@@ -51,6 +51,7 @@ class SalesBot(commands.Bot):
         self.database = Database(
             path=settings.sqlite_path,
             schema_path=Path(__file__).with_name("sql") / "schema.sql",
+            database_url=settings.database_url,
         )
         self.http_session: aiohttp.ClientSession | None = None
         self.web_runner: web.AppRunner | None = None

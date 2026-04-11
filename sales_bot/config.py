@@ -50,6 +50,7 @@ class Settings:
     web_host: str
     web_port: int
     sqlite_path: Path
+    database_url: str | None
     data_dir: Path
     log_level: str
     sync_commands_on_startup: bool
@@ -97,6 +98,7 @@ class Settings:
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
             web_port=int(os.getenv("WEB_PORT", os.getenv("PORT", "8080"))),
             sqlite_path=sqlite_path,
+            database_url=_optional_env("DATABASE_URL"),
             data_dir=data_dir,
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             sync_commands_on_startup=_optional_bool("SYNC_COMMANDS_ON_STARTUP", True),

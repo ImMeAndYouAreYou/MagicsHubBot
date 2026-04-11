@@ -42,7 +42,7 @@ class OwnershipService:
             FROM user_systems us
             JOIN systems s ON s.id = us.system_id
             WHERE us.user_id = ?
-            ORDER BY s.name COLLATE NOCASE ASC
+            ORDER BY LOWER(s.name) ASC
             """,
             (user_id,),
         )

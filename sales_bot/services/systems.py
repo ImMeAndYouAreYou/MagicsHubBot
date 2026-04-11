@@ -65,7 +65,7 @@ class SystemService:
 
     async def get_system_by_name(self, name: str) -> SystemRecord:
         row = await self.database.fetchone(
-            "SELECT * FROM systems WHERE name = ? COLLATE NOCASE",
+            "SELECT * FROM systems WHERE LOWER(name) = LOWER(?)",
             (name.strip(),),
         )
         if row is None:
@@ -73,18 +73,18 @@ class SystemService:
         return self._map_system(row)
 
     async def list_systems(self) -> list[SystemRecord]:
-        rows = await self.database.fetchall("SELECT * FROM systems ORDER BY name COLLATE NOCASE ASC")
+        rows = await self.database.fetchall("SELECT * FROM systems ORDER BY LOWER(name) ASC")
         return [self._map_system(row) for row in rows]
 
     async def list_paypal_enabled_systems(self) -> list[SystemRecord]:
         rows = await self.database.fetchall(
-            "SELECT * FROM systems WHERE paypal_link IS NOT NULL AND paypal_link != '' ORDER BY name COLLATE NOCASE ASC"
+            "SELECT * FROM systems WHERE paypal_link IS NOT NULL AND paypal_link != '' ORDER BY LOWER(name) ASC"
         )
         return [self._map_system(row) for row in rows]
 
     async def list_robux_enabled_systems(self) -> list[SystemRecord]:
         rows = await self.database.fetchall(
-            "SELECT * FROM systems WHERE roblox_gamepass_id IS NOT NULL AND roblox_gamepass_id != '' ORDER BY name COLLATE NOCASE ASC"
+            "SELECT * FROM systems WHERE roblox_gamepass_id IS NOT NULL AND roblox_gamepass_id != '' ORDER BY LOWER(name) ASC"
         )
         return [self._map_system(row) for row in rows]
 
@@ -96,12 +96,12 @@ class SystemService:
         robux_only: bool = False,
     ) -> list[SystemRecord]:
         like_value = f"%{current.strip()}%"
-        query = "SELECT * FROM systems WHERE name LIKE ? COLLATE NOCASE"
+        query = "SELECT * FROM systems WHERE LOWER(name) LIKE LOWER(?)"
         if paypal_only:
             query += " AND paypal_link IS NOT NULL AND paypal_link != ''"
         if robux_only:
             query += " AND roblox_gamepass_id IS NOT NULL AND roblox_gamepass_id != ''"
-        query += " ORDER BY name COLLATE NOCASE ASC LIMIT 25"
+        query += " ORDER BY LOWER(name) ASC LIMIT 25"
         rows = await self.database.fetchall(query, (like_value,))
         return [self._map_system(row) for row in rows]
 

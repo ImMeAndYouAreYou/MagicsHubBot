@@ -29,6 +29,9 @@ async def healthcheck(request: web.Request) -> web.Response:
 
 async def roblox_callback(request: web.Request) -> web.Response:
     bot: SalesBot = request.app["bot"]
+    if not bot.settings.roblox_oauth_enabled:
+        return web.Response(text="Roblox OAuth is not configured for this deployment.", status=503)
+
     state = request.query.get("state", "")
     code = request.query.get("code", "")
 

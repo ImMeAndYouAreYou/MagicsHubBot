@@ -117,23 +117,35 @@ Required values:
 - `DISCORD_CLIENT_SECRET`
 - `OWNER_USER_ID`
 - `VOUCH_CHANNEL_ID`
+- `PAYPAL_WEBHOOK_TOKEN`
+
+Optional values:
+
 - `ROBLOX_CLIENT_ID`
 - `ROBLOX_CLIENT_SECRET`
 - `ROBLOX_REDIRECT_URI`
 - `ROBLOX_ENTRY_LINK`
 - `ROBLOX_PRIVACY_POLICY_URL`
 - `ROBLOX_TERMS_URL`
-- `PAYPAL_WEBHOOK_TOKEN`
-
-Optional values:
-
 - `PUBLIC_BASE_URL`
 - `WEB_HOST`
 - `WEB_PORT`
+- `PORT`
 - `SQLITE_PATH`
 - `LOG_LEVEL`
 - `SYNC_COMMANDS_ON_STARTUP`
 - `DEV_GUILD_ID`
+
+If the Roblox OAuth variables are omitted, the bot still starts normally and the `/link` flow stays unavailable until those values are configured.
+
+## Render
+
+Render Web Service settings:
+
+- Build command: `pip install -r requirements.txt`
+- Start command: `python main.py`
+
+The app now falls back to Render's `PORT` environment variable automatically, so `WEB_PORT=$PORT` is no longer required in the start command.
 
 ## Running In Visual Studio Code
 

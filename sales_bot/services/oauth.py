@@ -10,7 +10,7 @@ import aiohttp
 
 from sales_bot.config import Settings
 from sales_bot.db import Database
-from sales_bot.exceptions import ExternalServiceError, NotFoundError
+from sales_bot.exceptions import ConfigurationError, ExternalServiceError, NotFoundError
 from sales_bot.models import RobloxLinkRecord
 
 
@@ -23,7 +23,15 @@ class RobloxOAuthService:
         self.database = database
         self.settings = settings
 
+    def ensure_configured(self) -> None:
+        if not self.settings.roblox_oauth_enabled:
+            raise ConfigurationError(
+                "Roblox OAuth is not configured. Set ROBLOX_CLIENT_ID, ROBLOX_CLIENT_SECRET, "
+                "ROBLOX_REDIRECT_URI, ROBLOX_ENTRY_LINK, ROBLOX_PRIVACY_POLICY_URL, and ROBLOX_TERMS_URL."
+            )
+
     async def create_state(self, user_id: int) -> str:
+        self.ensure_configured()
         state = secrets.token_urlsafe(24)
         expires_at = datetime.now(UTC) + timedelta(minutes=15)
         await self.database.execute(
@@ -33,6 +41,7 @@ class RobloxOAuthService:
         return state
 
     def build_authorization_url(self, state: str) -> str:
+        self.ensure_configured()
         params = {
             "client_id": self.settings.roblox_client_id,
             "response_type": "code",
@@ -58,6 +67,7 @@ class RobloxOAuthService:
         return int(row["user_id"])
 
     async def exchange_code(self, session: aiohttp.ClientSession, code: str) -> dict[str, Any]:
+        self.ensure_configured()
         payload = {
             "grant_type": "authorization_code",
             "client_id": self.settings.roblox_client_id,

@@ -38,6 +38,7 @@ class Settings:
     discord_client_secret: str
     owner_user_id: int
     vouch_channel_id: int
+    order_channel_id: int
     roblox_client_id: str | None
     roblox_client_secret: str | None
     roblox_redirect_uri: str | None
@@ -84,6 +85,7 @@ class Settings:
             discord_client_secret=_require_env("DISCORD_CLIENT_SECRET"),
             owner_user_id=int(os.getenv("OWNER_USER_ID", "1204103872348557372")),
             vouch_channel_id=int(os.getenv("VOUCH_CHANNEL_ID", "1492468162372046908")),
+            order_channel_id=int(os.getenv("ORDER_CHANNEL_ID", "1492472669059285012")),
             roblox_client_id=_optional_env("ROBLOX_CLIENT_ID"),
             roblox_client_secret=_optional_env("ROBLOX_CLIENT_SECRET"),
             roblox_redirect_uri=_optional_env("ROBLOX_REDIRECT_URI"),

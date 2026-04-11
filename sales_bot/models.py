@@ -73,3 +73,18 @@ class RobloxLinkRecord:
     roblox_display_name: str | None
     profile_url: str | None
     linked_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class OrderRequestRecord:
+    id: int
+    user_id: int
+    requested_item: str
+    required_timeframe: str
+    payment_method: str
+    offered_price: str
+    status: str
+    owner_message_id: int | None
+    submitted_at: str
+    reviewed_at: str | None
+    reviewed_by: int | None

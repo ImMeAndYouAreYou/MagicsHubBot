@@ -17,11 +17,13 @@ from sales_bot.services.admins import AdminService
 from sales_bot.services.blacklist import BlacklistService
 from sales_bot.services.delivery import DeliveryService
 from sales_bot.services.oauth import RobloxOAuthService
+from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.payments import PaymentService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
 from sales_bot.ui.appeals import AppealDecisionView
+from sales_bot.ui.orders import OrderDecisionView, OrderPanelView
 from sales_bot.web import create_web_app
 
 
@@ -35,6 +37,7 @@ class SalesBot(commands.Bot):
         "sales_bot.cogs.blacklist",
         "sales_bot.cogs.payments",
         "sales_bot.cogs.ownership",
+        "sales_bot.cogs.orders",
         "sales_bot.cogs.vouches",
         "sales_bot.cogs.oauth",
         "sales_bot.cogs.support",
@@ -62,6 +65,7 @@ class SalesBot(commands.Bot):
             blacklist=BlacklistService(self.database),
             systems=SystemService(self.database, self.settings.data_dir / "systems"),
             ownership=OwnershipService(self.database),
+            orders=OrderService(self.database),
             delivery=DeliveryService(),
             payments=PaymentService(self.database),
             vouches=VouchService(self.database),
@@ -90,12 +94,22 @@ class SalesBot(commands.Bot):
         LOGGER.info("Synced %s global commands", len(synced))
 
     async def _restore_persistent_views(self) -> None:
+        self.add_view(OrderPanelView(self))
+
         pending_appeals = await self.services.blacklist.list_pending_appeals()
         for appeal in pending_appeals:
             if appeal.owner_message_id:
                 self.add_view(
                     AppealDecisionView(self, appeal.id, appeal.user_id),
                     message_id=appeal.owner_message_id,
+                )
+
+        pending_orders = await self.services.orders.list_pending_requests()
+        for order in pending_orders:
+            if order.owner_message_id:
+                self.add_view(
+                    OrderDecisionView(self, order.id, order.user_id),
+                    message_id=order.owner_message_id,
                 )
 
     async def _start_web_server(self) -> None:

@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from sales_bot.bot import SalesBot
-from sales_bot.checks import admin_only
+from sales_bot.checks import admin_only, linked_roblox_required
 from sales_bot.ui.common import ConfirmView, PaginatedSelectView
 
 
@@ -24,6 +24,21 @@ async def system_autocomplete(
 class SystemsCog(commands.Cog):
     def __init__(self, bot: SalesBot) -> None:
         self.bot = bot
+
+    @app_commands.command(name="systemslist", description="הצגת כל המערכות שנוספו לבוט.")
+    @linked_roblox_required()
+    async def systemslist(self, interaction: discord.Interaction) -> None:
+        systems = await self.bot.services.systems.list_systems()
+        if not systems:
+            await interaction.response.send_message("כרגע אין מערכות שמורות בבוט.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="רשימת המערכות", color=discord.Color.blue())
+        embed.description = "\n".join(
+            f"• **{system.name}**" for system in systems
+        )
+        embed.set_footer(text=f"סה\"כ מערכות: {len(systems)}")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="addsystem", description="Create a new system entry and upload its deliverable files.")
     @app_commands.describe(

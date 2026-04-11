@@ -64,6 +64,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/addadmin`
 - `/removeadmin`
 - `/addsystem`
+- `/systemslist`
 - `/removesystem`
 - `/sendsystem`
 - `/blacklist`
@@ -72,6 +73,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/buywithpaypal`
 - `/buywithrobux`
 - `/getsystem`
+- `/sendorderpanel`
 - `/checksystems`
 - `/revokesystem`
 - `/givesystem`
@@ -92,6 +94,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Roblox OAuth uses an aiohttp callback server and stores linked Roblox profile data per Discord user.
 - `/getsystem` checks the linked Roblox account against the configured system gamepass using Roblox inventory ownership before delivering the system.
 - Incoming user DMs are forwarded to the configured owner for visibility.
+- The custom-order flow posts a button panel, collects a modal request, previews it to the user, and sends it to the owner DM with accept or reject buttons.
 
 ## Database Schema
 

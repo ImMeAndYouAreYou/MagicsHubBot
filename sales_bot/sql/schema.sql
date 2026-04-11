@@ -97,8 +97,23 @@ CREATE TABLE IF NOT EXISTS roblox_links (
     linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS order_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    requested_item TEXT NOT NULL,
+    required_timeframe TEXT NOT NULL,
+    payment_method TEXT NOT NULL,
+    offered_price TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    owner_message_id INTEGER,
+    submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT,
+    reviewed_by INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_systems_name ON systems(name);
 CREATE INDEX IF NOT EXISTS idx_user_systems_user ON user_systems(user_id);
 CREATE INDEX IF NOT EXISTS idx_blacklist_appeals_status ON blacklist_appeals(status);
 CREATE INDEX IF NOT EXISTS idx_paypal_purchases_status ON paypal_purchases(status);
 CREATE INDEX IF NOT EXISTS idx_vouches_admin_user ON vouches(admin_user_id);
+CREATE INDEX IF NOT EXISTS idx_order_requests_status ON order_requests(status);

@@ -55,11 +55,26 @@ class OwnershipCog(commands.Cog):
         ) -> None:
             selected_system = system
 
+            already_owned = await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id)
+
+            if already_owned:
+                await self.bot.services.delivery.deliver_system(
+                    self.bot,
+                    interaction.user,
+                    selected_system,
+                    source="owned-system-redownload",
+                    granted_by=None,
+                    record_ownership=False,
+                )
+                await select_interaction.response.edit_message(
+                    content=f"המערכת **{selected_system.name}** נשלחה אליך שוב ב-DM כי היא כבר רשומה בבעלותך.",
+                    embed=None,
+                    view=None,
+                )
+                return
+
             if not selected_system.roblox_gamepass_id:
                 raise PermissionDeniedError("למערכת הזאת עדיין לא הוגדר גיימפאס Roblox, לכן אי אפשר לקבל אותה דרך הפקודה הזאת.")
-
-            if await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id):
-                raise AlreadyExistsError("המערכת הזאת כבר בבעלותך.")
 
             if self.bot.http_session is None:
                 raise ExternalServiceError("חיבור הרשת של הבוט לא זמין כרגע. נסה שוב בעוד רגע.")

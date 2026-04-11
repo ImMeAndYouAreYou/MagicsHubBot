@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from sales_bot.bot import SalesBot
+from sales_bot.checks import linked_roblox_required
 from sales_bot.exceptions import AlreadyExistsError, PermissionDeniedError
 from sales_bot.ui.common import PaginatedSelectView
 
@@ -17,13 +18,14 @@ class PaymentsCog(commands.Cog):
         if await self.bot.services.blacklist.is_blacklisted(user_id):
             raise PermissionDeniedError("Blacklisted users cannot purchase or receive systems.")
 
-    @app_commands.command(name="buywithpaypal", description="Choose a system with a PayPal link and receive the payment link.")
+    @app_commands.command(name="buywithpaypal", description="בחירת מערכת עם קישור PayPal.")
+    @linked_roblox_required()
     async def buywithpaypal(self, interaction: discord.Interaction) -> None:
         await self._validate_buyer(interaction.user.id)
 
         systems = await self.bot.services.systems.list_paypal_enabled_systems()
         if not systems:
-            await interaction.response.send_message("No systems currently have PayPal purchase links configured.", ephemeral=True)
+            await interaction.response.send_message("כרגע אין מערכות עם קישור PayPal מוגדר.", ephemeral=True)
             return
 
         async def on_selected(
@@ -33,7 +35,7 @@ class PaymentsCog(commands.Cog):
         ) -> None:
             selected_system = system
             if await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id):
-                raise AlreadyExistsError("You already own that system.")
+                raise AlreadyExistsError("המערכת הזאת כבר בבעלותך.")
 
             purchase = await self.bot.services.payments.create_purchase(
                 interaction.user.id,
@@ -41,14 +43,14 @@ class PaymentsCog(commands.Cog):
                 selected_system.paypal_link,
             )
 
-            embed = discord.Embed(title=f"Pay for {selected_system.name}", color=discord.Color.green())
-            embed.description = "Use the PayPal button below. Once the webhook reports the payment as completed, the bot will DM your system automatically."
-            embed.add_field(name="Purchase ID", value=str(purchase.id), inline=False)
-            embed.add_field(name="Webhook Endpoint", value=f"{self.bot.settings.public_base_url}/webhooks/paypal/simulate", inline=False)
+            embed = discord.Embed(title=f"תשלום עבור {selected_system.name}", color=discord.Color.green())
+            embed.description = "לחץ על כפתור PayPal למטה. אחרי שהתשלום יאושר דרך הוובהוק, המערכת תישלח אליך ב-DM אוטומטית."
+            embed.add_field(name="מזהה רכישה", value=str(purchase.id), inline=False)
+            embed.add_field(name="קישור Webhook", value=f"{self.bot.settings.public_base_url}/webhooks/paypal/simulate", inline=False)
             link_view = discord.ui.View()
             link_view.add_item(
                 discord.ui.Button(
-                    label="Open PayPal",
+                    label="פתח PayPal",
                     style=discord.ButtonStyle.link,
                     url=selected_system.paypal_link,
                 )
@@ -58,28 +60,29 @@ class PaymentsCog(commands.Cog):
         view = PaginatedSelectView(
             actor_id=interaction.user.id,
             items=systems,
-            placeholder="Select a system to buy",
+            placeholder="בחר מערכת לרכישה ב-PayPal",
             option_builder=lambda system: discord.SelectOption(
                 label=system.name[:100],
-                description=(system.description or "Configured PayPal checkout")[:100],
+                description=(system.description or "מערכת עם תשלום PayPal")[:100],
                 value=str(system.id),
             ),
             value_getter=lambda system: str(system.id),
             on_selected=on_selected,
         )
         await interaction.response.send_message(
-            "Pick a system to purchase via PayPal.",
+            "בחר מערכת לרכישה דרך PayPal.",
             view=view,
             ephemeral=True,
         )
 
-    @app_commands.command(name="buywithrobux", description="Choose a system with a Roblox gamepass and open its Robux purchase link.")
+    @app_commands.command(name="buywithrobux", description="בחירת מערכת עם גיימפאס רובלוקס לקניית Robux.")
+    @linked_roblox_required()
     async def buywithrobux(self, interaction: discord.Interaction) -> None:
         await self._validate_buyer(interaction.user.id)
 
         systems = await self.bot.services.systems.list_robux_enabled_systems()
         if not systems:
-            await interaction.response.send_message("No systems currently have Roblox gamepass links configured.", ephemeral=True)
+            await interaction.response.send_message("כרגע אין מערכות עם גיימפאס Roblox מוגדר.", ephemeral=True)
             return
 
         async def on_selected(
@@ -89,17 +92,17 @@ class PaymentsCog(commands.Cog):
         ) -> None:
             selected_system = system
             if await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id):
-                raise AlreadyExistsError("You already own that system.")
+                raise AlreadyExistsError("המערכת הזאת כבר בבעלותך.")
 
             gamepass_url = self.bot.services.systems.gamepass_url_for_id(selected_system.roblox_gamepass_id)
-            embed = discord.Embed(title=f"Buy {selected_system.name} with Robux", color=discord.Color.blurple())
-            embed.description = "Use the Roblox gamepass button below to complete the Robux purchase for this system."
-            embed.add_field(name="Gamepass", value=gamepass_url or "Not configured", inline=False)
+            embed = discord.Embed(title=f"רכישת {selected_system.name} עם Robux", color=discord.Color.blurple())
+            embed.description = "לחץ על כפתור הגיימפאס למטה כדי להשלים את הרכישה ב-Robux."
+            embed.add_field(name="קישור גיימפאס", value=gamepass_url or "לא מוגדר", inline=False)
 
             link_view = discord.ui.View()
             link_view.add_item(
                 discord.ui.Button(
-                    label="Open Gamepass",
+                    label="פתח גיימפאס",
                     style=discord.ButtonStyle.link,
                     url=gamepass_url,
                 )
@@ -109,17 +112,17 @@ class PaymentsCog(commands.Cog):
         view = PaginatedSelectView(
             actor_id=interaction.user.id,
             items=systems,
-            placeholder="Select a system to buy with Robux",
+            placeholder="בחר מערכת לרכישה ב-Robux",
             option_builder=lambda system: discord.SelectOption(
                 label=system.name[:100],
-                description=(system.description or "Configured Roblox gamepass")[:100],
+                description=(system.description or "מערכת עם גיימפאס Roblox")[:100],
                 value=str(system.id),
             ),
             value_getter=lambda system: str(system.id),
             on_selected=on_selected,
         )
         await interaction.response.send_message(
-            "Pick a system to purchase via Robux.",
+            "בחר מערכת לרכישה דרך Robux.",
             view=view,
             ephemeral=True,
         )

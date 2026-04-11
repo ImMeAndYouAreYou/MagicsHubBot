@@ -156,17 +156,17 @@ async def roblox_callback(request: web.Request) -> web.Response:
 
         user = await bot.fetch_user(user_id)
         await user.send(
-            f"Your Roblox account has been linked successfully as **{record.roblox_username or record.roblox_sub}**."
+            f"חשבון הרובלוקס שלך קושר בהצלחה בתור **{record.roblox_username or record.roblox_sub}**."
         )
     except (NotFoundError, ExternalServiceError) as exc:
         LOGGER.warning("Roblox OAuth callback failed: %s", exc)
-        return web.Response(text=f"Link failed: {exc}", status=400)
+        return web.Response(text=f"הקישור נכשל: {exc}", status=400)
     except Exception:
         LOGGER.exception("Unexpected Roblox OAuth callback failure")
-        return web.Response(text="Unexpected OAuth error.", status=500)
+        return web.Response(text="אירעה שגיאת OAuth לא צפויה.", status=500)
 
     return web.Response(
-        text="Roblox account linked successfully. You can close this window.",
+        text="חשבון הרובלוקס קושר בהצלחה. אפשר לסגור את החלון.",
         content_type="text/plain",
     )
 

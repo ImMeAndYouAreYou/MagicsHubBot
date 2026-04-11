@@ -24,3 +24,21 @@ def admin_only() -> app_commands.Check:
         raise app_commands.CheckFailure("Only bot admins can use this command.")
 
     return app_commands.check(predicate)
+
+
+def linked_roblox_required() -> app_commands.Check:
+    async def predicate(interaction: discord.Interaction) -> bool:
+        bot = interaction.client
+        if not hasattr(bot, "services"):
+            raise app_commands.CheckFailure("הבוט עדיין נטען. נסה שוב בעוד רגע.")
+
+        sales_bot = cast("SalesBot", bot)
+
+        try:
+            await sales_bot.services.oauth.get_link(interaction.user.id)
+        except Exception:
+            raise app_commands.CheckFailure("כדי להשתמש בפקודה הזאת צריך קודם לקשר חשבון רובלוקס עם `/link`.")
+
+        return True
+
+    return app_commands.check(predicate)

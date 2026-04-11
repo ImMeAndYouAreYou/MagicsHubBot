@@ -18,6 +18,7 @@ class RobloxOAuthService:
     AUTHORIZATION_ENDPOINT = "https://apis.roblox.com/oauth/v1/authorize"
     TOKEN_ENDPOINT = "https://apis.roblox.com/oauth/v1/token"
     USERINFO_ENDPOINT = "https://apis.roblox.com/oauth/v1/userinfo"
+    INVENTORY_OWNERSHIP_ENDPOINT = "https://inventory.roblox.com/v1/users/{user_id}/items/GamePass/{gamepass_id}/is-owned"
 
     def __init__(self, database: Database, settings: Settings) -> None:
         self.database = database
@@ -134,3 +135,22 @@ class RobloxOAuthService:
             profile_url=str(row["profile_url"]) if row["profile_url"] else None,
             linked_at=str(row["linked_at"]),
         )
+
+    async def linked_user_owns_gamepass(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        discord_user_id: int,
+        gamepass_id: str,
+    ) -> bool:
+        link_record = await self.get_link(discord_user_id)
+        url = self.INVENTORY_OWNERSHIP_ENDPOINT.format(
+            user_id=link_record.roblox_sub,
+            gamepass_id=gamepass_id,
+        )
+        async with session.get(url) as response:
+            if response.status >= 400:
+                raise ExternalServiceError("לא הצלחתי לבדוק אם המשתמש מחזיק בגיימפאס הזה ברובלוקס.")
+
+            data = await response.json(content_type=None)
+            return bool(data)

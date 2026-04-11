@@ -5,8 +5,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from sales_bot.bot import SalesBot
-from sales_bot.checks import admin_only
+from sales_bot.checks import admin_only, linked_roblox_required
+from sales_bot.exceptions import AlreadyExistsError, ExternalServiceError, PermissionDeniedError
 from sales_bot.ui.common import ConfirmView
+from sales_bot.ui.common import PaginatedSelectView
 
 
 async def system_autocomplete(
@@ -37,6 +39,69 @@ class OwnershipCog(commands.Cog):
             embed.description = "This user does not currently own any systems."
         embed.set_footer(text=f"Total owned: {len(systems)}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="getsystem", description="קבלת מערכת אם החשבון המקושר שלך מחזיק בגיימפאס המתאים.")
+    @linked_roblox_required()
+    async def getsystem(self, interaction: discord.Interaction) -> None:
+        systems = await self.bot.services.systems.list_systems()
+        if not systems:
+            await interaction.response.send_message("כרגע אין מערכות זמינות בבוט.", ephemeral=True)
+            return
+
+        async def on_selected(
+            select_interaction: discord.Interaction,
+            system: object,
+            parent_view: PaginatedSelectView,
+        ) -> None:
+            selected_system = system
+
+            if not selected_system.roblox_gamepass_id:
+                raise PermissionDeniedError("למערכת הזאת עדיין לא הוגדר גיימפאס Roblox, לכן אי אפשר לקבל אותה דרך הפקודה הזאת.")
+
+            if await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id):
+                raise AlreadyExistsError("המערכת הזאת כבר בבעלותך.")
+
+            if self.bot.http_session is None:
+                raise ExternalServiceError("חיבור הרשת של הבוט לא זמין כרגע. נסה שוב בעוד רגע.")
+
+            owns_gamepass = await self.bot.services.oauth.linked_user_owns_gamepass(
+                self.bot.http_session,
+                discord_user_id=interaction.user.id,
+                gamepass_id=selected_system.roblox_gamepass_id,
+            )
+            if not owns_gamepass:
+                raise PermissionDeniedError("לפי בדיקת Roblox, החשבון המקושר שלך לא מחזיק בגיימפאס של המערכת הזאת.")
+
+            await self.bot.services.delivery.deliver_system(
+                self.bot,
+                interaction.user,
+                selected_system,
+                source="roblox-gamepass-claim",
+                granted_by=None,
+            )
+            await select_interaction.response.edit_message(
+                content=f"המערכת **{selected_system.name}** נשלחה אליך ב-DM כי הגיימפאס אומת בהצלחה.",
+                embed=None,
+                view=None,
+            )
+
+        view = PaginatedSelectView(
+            actor_id=interaction.user.id,
+            items=systems,
+            placeholder="בחר מערכת לבדיקה וקבלה",
+            option_builder=lambda system: discord.SelectOption(
+                label=system.name[:100],
+                description=system.description[:100],
+                value=str(system.id),
+            ),
+            value_getter=lambda system: str(system.id),
+            on_selected=on_selected,
+        )
+        await interaction.response.send_message(
+            "בחר את המערכת שתרצה לבדוק מולה את הגיימפאס של החשבון המקושר שלך.",
+            view=view,
+            ephemeral=True,
+        )
 
     @app_commands.command(name="givesystem", description="Preview and confirm a system delivery to a user.")
     @app_commands.describe(user="Recipient for the system.", system="System to grant.")

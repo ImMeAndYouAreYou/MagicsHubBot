@@ -71,6 +71,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/requestblacklistremove`
 - `/buywithpaypal`
 - `/buywithrobux`
+- `/getsystem`
 - `/checksystems`
 - `/revokesystem`
 - `/givesystem`
@@ -89,6 +90,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Ownership is tracked in `user_systems` and can be granted, checked, or revoked.
 - Vouches use a preview flow with edit support and publish to the configured vouch channel.
 - Roblox OAuth uses an aiohttp callback server and stores linked Roblox profile data per Discord user.
+- `/getsystem` checks the linked Roblox account against the configured system gamepass using Roblox inventory ownership before delivering the system.
 - Incoming user DMs are forwarded to the configured owner for visibility.
 
 ## Database Schema

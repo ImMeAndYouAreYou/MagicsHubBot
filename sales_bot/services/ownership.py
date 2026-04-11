@@ -113,6 +113,7 @@ class OwnershipService:
             file_path=str(row["file_path"]),
             image_path=str(row["image_path"]) if row["image_path"] else None,
             paypal_link=str(row["paypal_link"]) if row["paypal_link"] else None,
+            roblox_gamepass_id=str(row["roblox_gamepass_id"]) if row["roblox_gamepass_id"] else None,
             created_by=int(row["created_by"]) if row["created_by"] is not None else None,
             created_at=str(row["created_at"]),
         )

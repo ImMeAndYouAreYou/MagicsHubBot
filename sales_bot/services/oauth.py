@@ -19,6 +19,7 @@ class RobloxOAuthService:
     TOKEN_ENDPOINT = "https://apis.roblox.com/oauth/v1/token"
     USERINFO_ENDPOINT = "https://apis.roblox.com/oauth/v1/userinfo"
     INVENTORY_OWNERSHIP_ENDPOINT = "https://inventory.roblox.com/v1/users/{user_id}/items/GamePass/{gamepass_id}/is-owned"
+    STATE_LIFETIME_MINUTES = 60
 
     def __init__(self, database: Database, settings: Settings) -> None:
         self.database = database
@@ -33,8 +34,10 @@ class RobloxOAuthService:
 
     async def create_state(self, user_id: int) -> str:
         self.ensure_configured()
+        await self.database.execute("DELETE FROM oauth_states WHERE user_id = ?", (user_id,))
+        await self.database.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (datetime.now(UTC).isoformat(),))
         state = secrets.token_urlsafe(24)
-        expires_at = datetime.now(UTC) + timedelta(minutes=15)
+        expires_at = datetime.now(UTC) + timedelta(minutes=self.STATE_LIFETIME_MINUTES)
         await self.database.execute(
             "INSERT INTO oauth_states (state, user_id, expires_at) VALUES (?, ?, ?)",
             (state, user_id, expires_at.isoformat()),
@@ -53,17 +56,20 @@ class RobloxOAuthService:
         return f"{self.AUTHORIZATION_ENDPOINT}?{urlencode(params)}"
 
     async def consume_state(self, state: str) -> int:
+        await self.database.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (datetime.now(UTC).isoformat(),))
         row = await self.database.fetchone(
             "SELECT * FROM oauth_states WHERE state = ?",
             (state,),
         )
         if row is None:
-            raise NotFoundError("OAuth state is invalid or expired.")
+            raise NotFoundError("OAuth state is invalid or expired. Run /link again and use the newest button.")
 
         expires_at = datetime.fromisoformat(str(row["expires_at"]))
-        await self.database.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
         if expires_at < datetime.now(UTC):
-            raise NotFoundError("OAuth state is invalid or expired.")
+            await self.database.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+            raise NotFoundError("OAuth state is invalid or expired. Run /link again and use the newest button.")
+
+        await self.database.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
 
         return int(row["user_id"])
 

@@ -324,6 +324,13 @@ class OrderManagementView(RestrictedView):
             reviewer_id=interaction.user.id,
             status="completed",
         )
+        try:
+            requester = await self.bot.fetch_user(self.order.user_id)
+            await requester.send(
+                "ההזמנה שלך הושלמה בהצלחה. נשמח מאוד שתשאיר הוכחה באמצעות הפקודה: '/Vouch'. זה יוערך מאוד."
+            )
+        except discord.HTTPException:
+            pass
         await self._update_message(interaction=interaction, status="completed")
         self.stop()
 

@@ -162,5 +162,11 @@ class SalesBot(commands.Bot):
         responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
         try:
             await responder(message, ephemeral=True)
-        except discord.HTTPException:
+        except discord.HTTPException as exc:
+            if exc.code == 40060:
+                try:
+                    await interaction.followup.send(message, ephemeral=True)
+                    return
+                except discord.HTTPException:
+                    pass
             LOGGER.exception("Failed to send interaction error response")

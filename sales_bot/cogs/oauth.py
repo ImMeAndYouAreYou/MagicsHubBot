@@ -28,7 +28,14 @@ class OAuthCog(commands.Cog):
 
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="קשר חשבון", style=discord.ButtonStyle.link, url=authorization_url))
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=interaction.guild is not None)
+        ephemeral = interaction.guild is not None
+        try:
+            responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+            await responder(embed=embed, view=view, ephemeral=ephemeral)
+        except discord.HTTPException as exc:
+            if exc.code != 40060:
+                raise
+            await interaction.followup.send(embed=embed, view=view, ephemeral=ephemeral)
 
 
 async def setup(bot: SalesBot) -> None:

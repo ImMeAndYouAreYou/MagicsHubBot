@@ -79,6 +79,11 @@ class Settings:
             sqlite_path = base_dir / sqlite_path
 
         data_dir = sqlite_path.parent
+        public_base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8080").rstrip("/")
+        roblox_redirect_uri = _optional_env("ROBLOX_REDIRECT_URI") or f"{public_base_url}/oauth/roblox/callback"
+        roblox_entry_link = _optional_env("ROBLOX_ENTRY_LINK") or f"{public_base_url}/link"
+        roblox_privacy_policy_url = _optional_env("ROBLOX_PRIVACY_POLICY_URL") or f"{public_base_url}/privacy"
+        roblox_terms_url = _optional_env("ROBLOX_TERMS_URL") or f"{public_base_url}/terms"
 
         settings = cls(
             discord_token=_require_env("DISCORD_TOKEN"),
@@ -89,11 +94,11 @@ class Settings:
             order_channel_id=int(os.getenv("ORDER_CHANNEL_ID", "1492472669059285012")),
             roblox_client_id=_optional_env("ROBLOX_CLIENT_ID"),
             roblox_client_secret=_optional_env("ROBLOX_CLIENT_SECRET"),
-            roblox_redirect_uri=_optional_env("ROBLOX_REDIRECT_URI"),
-            roblox_entry_link=_optional_env("ROBLOX_ENTRY_LINK"),
-            roblox_privacy_policy_url=_optional_env("ROBLOX_PRIVACY_POLICY_URL"),
-            roblox_terms_url=_optional_env("ROBLOX_TERMS_URL"),
-            public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8080").rstrip("/"),
+            roblox_redirect_uri=roblox_redirect_uri,
+            roblox_entry_link=roblox_entry_link,
+            roblox_privacy_policy_url=roblox_privacy_policy_url,
+            roblox_terms_url=roblox_terms_url,
+            public_base_url=public_base_url,
             paypal_webhook_token=_require_env("PAYPAL_WEBHOOK_TOKEN"),
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
             web_port=int(os.getenv("WEB_PORT", os.getenv("PORT", "8080"))),
@@ -106,17 +111,6 @@ class Settings:
             self_ping_enabled=_optional_bool("SELF_PING_ENABLED", True),
             self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
         )
-
-        # Set Roblox OAuth URL defaults based on PUBLIC_BASE_URL if not provided
-        if settings.public_base_url:
-            if not settings.roblox_redirect_uri:
-                settings.roblox_redirect_uri = f"{settings.public_base_url}/oauth/roblox/callback"
-            if not settings.roblox_entry_link:
-                settings.roblox_entry_link = f"{settings.public_base_url}/link"
-            if not settings.roblox_privacy_policy_url:
-                settings.roblox_privacy_policy_url = f"{settings.public_base_url}/privacy"
-            if not settings.roblox_terms_url:
-                settings.roblox_terms_url = f"{settings.public_base_url}/terms"
 
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)

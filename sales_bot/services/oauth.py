@@ -34,7 +34,6 @@ class RobloxOAuthService:
 
     async def create_state(self, user_id: int) -> str:
         self.ensure_configured()
-        await self.database.execute("DELETE FROM oauth_states WHERE user_id = ?", (user_id,))
         await self.database.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (datetime.now(UTC).isoformat(),))
         state = secrets.token_urlsafe(24)
         expires_at = datetime.now(UTC) + timedelta(minutes=self.STATE_LIFETIME_MINUTES)
@@ -62,12 +61,12 @@ class RobloxOAuthService:
             (state,),
         )
         if row is None:
-            raise NotFoundError("OAuth state is invalid or expired. Run /link again and use the newest button.")
+            raise NotFoundError("OAuth state is invalid or expired. Run /link again and try the new button.")
 
         expires_at = datetime.fromisoformat(str(row["expires_at"]))
         if expires_at < datetime.now(UTC):
             await self.database.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
-            raise NotFoundError("OAuth state is invalid or expired. Run /link again and use the newest button.")
+            raise NotFoundError("OAuth state is invalid or expired. Run /link again and try the new button.")
 
         await self.database.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
 

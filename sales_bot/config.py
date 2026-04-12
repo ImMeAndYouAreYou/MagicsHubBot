@@ -147,7 +147,7 @@ class Settings:
             self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
         )
 
-        if data_dir_raw or not settings.supabase_storage_enabled:
+        if not settings.supabase_storage_enabled:
             settings.data_dir.mkdir(parents=True, exist_ok=True)
             (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)
             (settings.data_dir / "archive").mkdir(parents=True, exist_ok=True)

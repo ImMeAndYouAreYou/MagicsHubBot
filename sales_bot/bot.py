@@ -76,10 +76,6 @@ class SalesBot(commands.Bot):
             oauth=RobloxOAuthService(self.database, self.settings),
         )
 
-        backfilled_assets = await self.services.systems.backfill_binary_assets()
-        if backfilled_assets:
-            LOGGER.info("Backfilled persistent file data for %s systems", backfilled_assets)
-
 
         for extension in self.EXTENSIONS:
             await self.load_extension(extension)

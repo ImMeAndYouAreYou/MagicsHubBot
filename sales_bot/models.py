@@ -3,25 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-SYSTEM_SELECT_FIELDS = (
-    "id",
-    "name",
-    "description",
-    "file_path",
-    "image_path",
-    "paypal_link",
-    "roblox_gamepass_id",
-    "created_by",
-    "created_at",
-    "file_name",
-    "image_name",
-)
-
-
-def system_select_list(prefix: str = "") -> str:
-    return ", ".join(f"{prefix}{field}" for field in SYSTEM_SELECT_FIELDS)
-
-
 @dataclass(slots=True, frozen=True)
 class SystemRecord:
     id: int
@@ -33,8 +14,6 @@ class SystemRecord:
     roblox_gamepass_id: str | None
     created_by: int | None
     created_at: str
-    file_name: str | None
-    image_name: str | None
 
 
 @dataclass(slots=True, frozen=True)

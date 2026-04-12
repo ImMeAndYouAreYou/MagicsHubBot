@@ -12,16 +12,12 @@ def slugify(value: str) -> str:
     return sanitized[:48] or "item"
 
 
-def save_bytes(directory: Path, filename: str, data: bytes) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / f"{uuid4().hex}_{Path(filename).name}"
-    target.write_bytes(data)
-    return target
-
-
 async def save_attachment(attachment: discord.Attachment, directory: Path) -> Path:
-    data = await attachment.read()
-    return save_bytes(directory, attachment.filename, data)
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid4().hex}_{attachment.filename}"
+    target = directory / filename
+    await attachment.save(target)
+    return target
 
 
 def remove_path(path: str | Path | None) -> None:

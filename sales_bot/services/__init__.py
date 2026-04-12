@@ -9,6 +9,7 @@ from sales_bot.services.oauth import RobloxOAuthService
 from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.payments import PaymentService
+from sales_bot.services.system_storage import SupabaseStorageService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
 
@@ -17,6 +18,7 @@ from sales_bot.services.vouches import VouchService
 class ServiceContainer:
     admins: AdminService
     blacklist: BlacklistService
+    system_storage: SupabaseStorageService
     systems: SystemService
     ownership: OwnershipService
     orders: OrderService

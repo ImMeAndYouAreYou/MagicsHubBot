@@ -4,7 +4,7 @@ import aiosqlite
 
 from sales_bot.db import Database
 from sales_bot.exceptions import NotFoundError, PermissionDeniedError
-from sales_bot.models import DeliveryRecord, OwnedSystemRecord, SavedSystemRecord, SystemRecord, system_select_list
+from sales_bot.models import DeliveryRecord, OwnedSystemRecord, SavedSystemRecord, SystemRecord
 
 
 class OwnershipService:
@@ -41,12 +41,12 @@ class OwnershipService:
     async def list_user_systems(self, user_id: int) -> list[SystemRecord]:
         rows = await self.database.fetchall(
             """
-            SELECT {system_columns}
+            SELECT s.*
             FROM user_systems us
             JOIN systems s ON s.id = us.system_id
             WHERE us.user_id = ?
             ORDER BY LOWER(s.name) ASC
-            """.format(system_columns=system_select_list("s.")),
+            """,
             (user_id,),
         )
         return [self._map_system(row) for row in rows]
@@ -54,12 +54,12 @@ class OwnershipService:
     async def list_user_ownerships(self, user_id: int) -> list[OwnedSystemRecord]:
         rows = await self.database.fetchall(
             """
-            SELECT us.user_id, us.system_id, us.granted_by, us.source, us.granted_at, {system_columns}
+            SELECT us.user_id, us.system_id, us.granted_by, us.source, us.granted_at, s.*
             FROM user_systems us
             JOIN systems s ON s.id = us.system_id
             WHERE us.user_id = ?
             ORDER BY LOWER(s.name) ASC
-            """.format(system_columns=system_select_list("s.")),
+            """,
             (user_id,),
         )
         return [self._map_owned_system(row) for row in rows]
@@ -67,14 +67,14 @@ class OwnershipService:
     async def list_transferable_ownerships(self, user_id: int) -> list[OwnedSystemRecord]:
         rows = await self.database.fetchall(
             """
-                        SELECT us.user_id, us.system_id, us.granted_by, us.source, us.granted_at, {system_columns}
+            SELECT us.user_id, us.system_id, us.granted_by, us.source, us.granted_at, s.*
             FROM user_systems us
             JOIN systems s ON s.id = us.system_id
             WHERE us.user_id = ?
               AND us.source != ?
               AND (us.granted_by IS NOT NULL OR us.source = ?)
             ORDER BY LOWER(s.name) ASC
-                        """.format(system_columns=system_select_list("s.")),
+            """,
             (user_id, self.TRANSFER_SOURCE, self.ROBLOX_CLAIM_SOURCE),
         )
         return [self._map_owned_system(row) for row in rows]
@@ -104,12 +104,12 @@ class OwnershipService:
     async def list_saved_systems(self, user_id: int) -> list[SavedSystemRecord]:
         rows = await self.database.fetchall(
             """
-            SELECT t.user_id, t.system_id, t.source, t.saved_by, t.saved_at, {system_columns}
+            SELECT t.user_id, t.system_id, t.source, t.saved_by, t.saved_at, s.*
             FROM temp_saved_systems t
             JOIN systems s ON s.id = t.system_id
             WHERE t.user_id = ?
             ORDER BY LOWER(s.name) ASC
-            """.format(system_columns=system_select_list("s.")),
+            """,
             (user_id,),
         )
         return [self._map_saved_system(row) for row in rows]
@@ -218,14 +218,14 @@ class OwnershipService:
     async def list_claim_role_owned_systems(self, user_id: int) -> list[SystemRecord]:
         rows = await self.database.fetchall(
             """
-                        SELECT {system_columns}
+            SELECT s.*
             FROM user_systems us
             JOIN systems s ON s.id = us.system_id
             WHERE us.user_id = ?
               AND us.source != ?
               AND (us.granted_by IS NOT NULL OR us.source = ?)
             ORDER BY LOWER(s.name) ASC
-                        """.format(system_columns=system_select_list("s.")),
+            """,
             (user_id, self.TRANSFER_SOURCE, self.ROBLOX_CLAIM_SOURCE),
         )
         return [self._map_system(row) for row in rows]
@@ -262,22 +262,14 @@ class OwnershipService:
 
     @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:
-        file_path = str(row["file_path"])
-        image_path = str(row["image_path"]) if row["image_path"] else None
         return SystemRecord(
             id=int(row["id"]),
             name=str(row["name"]),
             description=str(row["description"]),
-            file_path=file_path,
-            image_path=image_path,
+            file_path=str(row["file_path"]),
+            image_path=str(row["image_path"]) if row["image_path"] else None,
             paypal_link=str(row["paypal_link"]) if row["paypal_link"] else None,
             roblox_gamepass_id=str(row["roblox_gamepass_id"]) if row["roblox_gamepass_id"] else None,
             created_by=int(row["created_by"]) if row["created_by"] is not None else None,
             created_at=str(row["created_at"]),
-            file_name=str(row["file_name"]) if row["file_name"] else file_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1],
-            image_name=(
-                str(row["image_name"])
-                if row["image_name"]
-                else (image_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1] if image_path else None)
-            ),
         )

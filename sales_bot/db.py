@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import aiosqlite
 import asyncpg
+
+
+type PgOperationResult = Any
 
 
 class Database:
@@ -14,6 +19,7 @@ class Database:
         self.database_url = database_url
         self._connection: aiosqlite.Connection | None = None
         self._pg_connection: asyncpg.Connection | None = None
+        self._pg_lock = asyncio.Lock()
 
     @property
     def connection(self) -> aiosqlite.Connection | asyncpg.Connection:
@@ -66,9 +72,7 @@ class Database:
 
     async def execute(self, query: str, parameters: Sequence[Any] = ()) -> None:
         if self.database_url:
-            pg_connection = self.connection
-            assert isinstance(pg_connection, asyncpg.Connection)
-            await pg_connection.execute(self._translate_query(query), *parameters)
+            await self._run_pg(lambda pg_connection: pg_connection.execute(self._translate_query(query), *parameters))
             return
 
         sqlite_connection = self.connection
@@ -78,9 +82,8 @@ class Database:
 
     async def executemany(self, query: str, parameters: Iterable[Sequence[Any]]) -> None:
         if self.database_url:
-            pg_connection = self.connection
-            assert isinstance(pg_connection, asyncpg.Connection)
-            await pg_connection.executemany(self._translate_query(query), list(parameters))
+            parameter_list = list(parameters)
+            await self._run_pg(lambda pg_connection: pg_connection.executemany(self._translate_query(query), parameter_list))
             return
 
         sqlite_connection = self.connection
@@ -90,9 +93,7 @@ class Database:
 
     async def fetchone(self, query: str, parameters: Sequence[Any] = ()) -> aiosqlite.Row | None:
         if self.database_url:
-            pg_connection = self.connection
-            assert isinstance(pg_connection, asyncpg.Connection)
-            return await pg_connection.fetchrow(self._translate_query(query), *parameters)
+            return await self._run_pg(lambda pg_connection: pg_connection.fetchrow(self._translate_query(query), *parameters))
 
         sqlite_connection = self.connection
         assert isinstance(sqlite_connection, aiosqlite.Connection)
@@ -101,9 +102,7 @@ class Database:
 
     async def fetchall(self, query: str, parameters: Sequence[Any] = ()) -> list[aiosqlite.Row]:
         if self.database_url:
-            pg_connection = self.connection
-            assert isinstance(pg_connection, asyncpg.Connection)
-            rows = await pg_connection.fetch(self._translate_query(query), *parameters)
+            rows = await self._run_pg(lambda pg_connection: pg_connection.fetch(self._translate_query(query), *parameters))
             return list(rows)
 
         sqlite_connection = self.connection
@@ -113,12 +112,10 @@ class Database:
 
     async def insert(self, query: str, parameters: Sequence[Any] = ()) -> int:
         if self.database_url:
-            pg_connection = self.connection
-            assert isinstance(pg_connection, asyncpg.Connection)
             translated = self._translate_query(query)
             if "RETURNING" not in translated.upper():
                 translated = translated.rstrip().rstrip(";") + " RETURNING id"
-            value = await pg_connection.fetchval(translated, *parameters)
+            value = await self._run_pg(lambda pg_connection: pg_connection.fetchval(translated, *parameters))
             return int(value)
 
         sqlite_connection = self.connection
@@ -139,3 +136,9 @@ class Database:
             rebuilt.append(f"${index}")
             rebuilt.append(part)
         return "".join(rebuilt)
+
+    async def _run_pg(self, operation: Callable[[asyncpg.Connection], Awaitable[PgOperationResult]]) -> PgOperationResult:
+        pg_connection = self.connection
+        assert isinstance(pg_connection, asyncpg.Connection)
+        async with self._pg_lock:
+            return await operation(pg_connection)

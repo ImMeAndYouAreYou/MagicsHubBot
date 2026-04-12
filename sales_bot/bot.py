@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -57,6 +58,7 @@ class SalesBot(commands.Bot):
         self.http_session: aiohttp.ClientSession | None = None
         self.web_runner: web.AppRunner | None = None
         self.services: ServiceContainer
+        self._command_sync_lock = asyncio.Lock()
         self.tree.on_error = self.on_app_command_error
 
     async def setup_hook(self) -> None:
@@ -85,15 +87,21 @@ class SalesBot(commands.Bot):
             await self._sync_commands()
 
     async def _sync_commands(self) -> None:
-        if self.settings.dev_guild_id:
-            guild = discord.Object(id=self.settings.dev_guild_id)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            LOGGER.info("Synced %s commands to dev guild %s", len(synced), self.settings.dev_guild_id)
-            return
+        async with self._command_sync_lock:
+            if self.settings.dev_guild_id:
+                guild = discord.Object(id=self.settings.dev_guild_id)
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                LOGGER.info("Synced %s commands to dev guild %s", len(synced), self.settings.dev_guild_id)
+                return
 
-        synced = await self.tree.sync()
-        LOGGER.info("Synced %s global commands", len(synced))
+            synced = await self.tree.sync()
+            LOGGER.info("Synced %s global commands", len(synced))
+
+    def _schedule_command_resync(self) -> None:
+        if self._command_sync_lock.locked():
+            return
+        asyncio.create_task(self._sync_commands())
 
     async def _restore_persistent_views(self) -> None:
         self.add_view(OrderPanelView(self))
@@ -155,6 +163,20 @@ class SalesBot(commands.Bot):
 
         if isinstance(original_error, discord.HTTPException) and original_error.code == 40060:
             LOGGER.warning("Skipping duplicate interaction acknowledgement error handling")
+            return
+
+        if isinstance(error, app_commands.CommandSignatureMismatch):
+            LOGGER.warning("Command signature mismatch detected for %s. Scheduling command resync.", error.command.name)
+            self._schedule_command_resync()
+            message = (
+                "הפקודה עודכנה אבל דיסקורד עדיין מחזיק גרסה ישנה שלה. "
+                "ביצעתי סנכרון מחדש; סגור ופתח שוב את תפריט הפקודות ונסה שוב בעוד כמה שניות."
+            )
+            responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+            try:
+                await responder(message, ephemeral=True)
+            except discord.HTTPException:
+                pass
             return
 
         LOGGER.exception("Application command error", exc_info=(type(original_error), original_error, original_error.__traceback__))

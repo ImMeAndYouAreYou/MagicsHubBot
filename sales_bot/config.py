@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,23 @@ def _optional_bool(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_runtime_data_dir(base_dir: Path) -> Path:
+    candidates = (
+        base_dir / "data",
+        Path(tempfile.gettempdir()) / "magic-studios-bot-data",
+    )
+    last_error: OSError | None = None
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            (candidate / "systems").mkdir(parents=True, exist_ok=True)
+            return candidate
+        except OSError as exc:
+            last_error = exc
+
+    raise ConfigurationError("Unable to initialize a writable runtime data directory.") from last_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +96,8 @@ class Settings:
         if not sqlite_path.is_absolute():
             sqlite_path = base_dir / sqlite_path
 
-        data_dir = sqlite_path.parent
+        database_url = _optional_env("DATABASE_URL")
+        data_dir = _resolve_runtime_data_dir(base_dir) if database_url else sqlite_path.parent
         public_base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8080").rstrip("/")
         roblox_redirect_uri = _optional_env("ROBLOX_REDIRECT_URI") or f"{public_base_url}/oauth/roblox/callback"
         roblox_entry_link = _optional_env("ROBLOX_ENTRY_LINK") or f"{public_base_url}/link"
@@ -103,7 +122,7 @@ class Settings:
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
             web_port=int(os.getenv("WEB_PORT", os.getenv("PORT", "8080"))),
             sqlite_path=sqlite_path,
-            database_url=_optional_env("DATABASE_URL"),
+            database_url=database_url,
             data_dir=data_dir,
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             sync_commands_on_startup=_optional_bool("SYNC_COMMANDS_ON_STARTUP", True),
@@ -112,6 +131,7 @@ class Settings:
             self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
         )
 
-        settings.data_dir.mkdir(parents=True, exist_ok=True)
-        (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)
+        if not settings.database_url:
+            settings.data_dir.mkdir(parents=True, exist_ok=True)
+            (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)
         return settings

@@ -19,7 +19,10 @@ class SystemService:
     def __init__(self, database: Database, storage_root: Path) -> None:
         self.database = database
         self.storage_root = storage_root
-        self.storage_root.mkdir(parents=True, exist_ok=True)
+        try:
+            self.storage_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
 
     async def create_system(
         self,

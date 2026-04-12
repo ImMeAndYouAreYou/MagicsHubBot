@@ -8,18 +8,73 @@ from sales_bot.exceptions import ExternalServiceError, PermissionDeniedError
 from sales_bot.ui.common import RestrictedView
 
 
+def parse_vouch_rating(raw_value: str) -> int:
+    try:
+        rating = int(raw_value)
+    except ValueError as exc:
+        raise PermissionDeniedError("הדירוג חייב להיות מספר בלבד בין 1 ל-5.") from exc
+
+    if rating not in {1, 2, 3, 4, 5}:
+        raise PermissionDeniedError("הדירוג חייב להיות בין 1 ל-5.")
+
+    return rating
+
+
+class VouchCreateModal(discord.ui.Modal):
+    def __init__(
+        self,
+        bot: discord.Client,
+        *,
+        actor_id: int,
+        admin_user: discord.abc.User,
+    ) -> None:
+        super().__init__(title="יצירת הוכחה")
+        self.bot = bot
+        self.actor_id = actor_id
+        self.admin_user = admin_user
+        self.reason_input = discord.ui.TextInput(
+            label="הסבר בקצרה על החוויה שלך, השירות",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+        )
+        self.rating_input = discord.ui.TextInput(
+            label="כמה אתה מדרג אותנו (1-5)",
+            style=discord.TextStyle.short,
+            max_length=1,
+        )
+        self.add_item(self.reason_input)
+        self.add_item(self.rating_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        rating = parse_vouch_rating(str(self.rating_input))
+        view = VouchPreviewView(
+            self.bot,
+            actor_id=self.actor_id,
+            admin_user=self.admin_user,
+            reason=str(self.reason_input),
+            rating=rating,
+        )
+        await interaction.response.send_message(
+            "בדוק את ההוכחה שלך לפני פרסומה.",
+            embed=view.build_preview_embed(),
+            view=view,
+            ephemeral=True,
+        )
+        view.message = await interaction.original_response()
+
+
 class VouchEditModal(discord.ui.Modal):
     def __init__(self, view: "VouchPreviewView") -> None:
         super().__init__(title="עריכת הוכחה")
         self.preview_view = view
         self.reason_input = discord.ui.TextInput(
-            label="הסבר בקצרה על החוויה שלך",
+            label="הסבר בקצרה על החוויה שלך, השירות",
             style=discord.TextStyle.paragraph,
             max_length=500,
             default=view.reason,
         )
         self.rating_input = discord.ui.TextInput(
-            label="דירוג (1-5)",
+            label="כמה אתה מדרג אותנו (1-5)",
             style=discord.TextStyle.short,
             max_length=1,
             default=str(view.rating),
@@ -28,14 +83,7 @@ class VouchEditModal(discord.ui.Modal):
         self.add_item(self.rating_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        try:
-            rating = int(str(self.rating_input))
-        except ValueError as exc:
-            raise PermissionDeniedError("הדירוג צריך להיות מספר בלבד בין 1 ל 5") from exc
-
-        if rating not in {1, 2, 3, 4, 5}:
-            raise PermissionDeniedError("הדירוג צריך להיות בין 1 ל 5")
-
+        rating = parse_vouch_rating(str(self.rating_input))
         self.preview_view.reason = str(self.reason_input)
         self.preview_view.rating = rating
         await interaction.response.defer()
@@ -62,9 +110,9 @@ class VouchPreviewView(RestrictedView):
     def build_preview_embed(self) -> discord.Embed:
         stars = "⭐" * self.rating
         embed = discord.Embed(title="תצוגת הוכחה", color=discord.Color.gold())
-        embed.add_field(name="הוכחה על", value=self.admin_user.mention, inline=False)
-        embed.add_field(name="הסבר מה קיבלת, מה קנית, ואת החוויה שלך", value=self.reason, inline=False)
-        embed.add_field(name="דירוג", value=f"{stars} ({self.rating}/5)", inline=False)
+        embed.add_field(name="הוכחה על", value=self.admin_user.mention, inline=True)
+        embed.add_field(name="הסבר בקצרה על החוויה שלך, השירות", value=self.reason, inline=False)
+        embed.add_field(name="דירוג", value=f"{stars} ({self.rating}/5)", inline=True)
         embed.set_footer(text="במידה ואחד הפרטים לא נכונים אנא תקן אותם באמצעות כפתור העריכה לפני שתאשר את ההוכחה")
         return embed
 
@@ -86,12 +134,12 @@ class VouchPreviewView(RestrictedView):
             channel = await self.bot.fetch_channel(self.bot.settings.vouch_channel_id)
 
         if not isinstance(channel, discord.abc.Messageable):
-            raise ExternalServiceError("Configured vouch channel is not messageable.")
+            raise ExternalServiceError("ערוץ ההוכחות שהוגדר בבוט לא תומך בשליחת הודעות.")
 
         publish_embed = discord.Embed(title="הוכחה חדשה", color=discord.Color.gold())
-        publish_embed.add_field(name="הוכחה על", value=self.admin_user.mention, inline=False)
-        publish_embed.add_field(name="הסבר מה קיבלת, מה קנית, ואת החוויה שלך", value=self.reason, inline=False)
-        publish_embed.add_field(name="דירוג", value=f"{'⭐' * self.rating} ({self.rating}/5)", inline=False)
+        publish_embed.add_field(name="הוכחה על", value=self.admin_user.mention, inline=True)
+        publish_embed.add_field(name="הסבר בקצרה על החוויה שלך, השירות", value=self.reason, inline=False)
+        publish_embed.add_field(name="דירוג", value=f"{'⭐' * self.rating} ({self.rating}/5)", inline=True)
         publish_embed.set_footer(text=f"הוכחה מאת: {interaction.user}")
 
         posted_message = await channel.send(embed=publish_embed)

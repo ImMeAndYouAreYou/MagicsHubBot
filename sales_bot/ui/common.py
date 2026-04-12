@@ -26,7 +26,7 @@ class RestrictedView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.actor_id:
             responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
-            await responder("You cannot interact with this panel.", ephemeral=True)
+            await responder("אין לך הרשאה להשתמש בפאנל הזה.", ephemeral=True)
             return False
         return True
 
@@ -37,7 +37,7 @@ class RestrictedView(discord.ui.View):
         item: discord.ui.Item[Any],
     ) -> None:
         LOGGER.exception("View interaction error in %s", type(self).__name__, exc_info=error)
-        message = str(error) if isinstance(error, SalesBotError) else "An unexpected UI error occurred."
+        message = str(error) if isinstance(error, SalesBotError) else "אירעה שגיאה לא צפויה בפאנל."
         responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
         await responder(message, ephemeral=True)
 
@@ -59,7 +59,7 @@ class ConfirmView(RestrictedView):
         self._on_confirm = on_confirm
         self._on_cancel = on_cancel
 
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="אישור", style=discord.ButtonStyle.success)
     async def confirm_button(
         self,
         interaction: discord.Interaction,
@@ -69,7 +69,7 @@ class ConfirmView(RestrictedView):
         await self._on_confirm(interaction, self)
         self.stop()
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="ביטול", style=discord.ButtonStyle.secondary)
     async def cancel_button(
         self,
         interaction: discord.Interaction,
@@ -79,7 +79,7 @@ class ConfirmView(RestrictedView):
         if self._on_cancel is not None:
             await self._on_cancel(interaction, self)
         else:
-            await interaction.response.edit_message(content="Action cancelled.", view=self)
+            await interaction.response.edit_message(content="הפעולה בוטלה.", view=self)
         self.stop()
 
 
@@ -133,7 +133,7 @@ class PaginatedSelectView(RestrictedView):
         self._value_map = {self.value_getter(item): item for item in current}
         options = [self.option_builder(item) for item in current]
         if not options:
-            options = [discord.SelectOption(label="No items available", value="empty", default=True)]
+            options = [discord.SelectOption(label="אין פריטים זמינים", value="empty", default=True)]
 
         self.select_menu.options = options
         self.select_menu.disabled = len(current) == 0
@@ -141,7 +141,7 @@ class PaginatedSelectView(RestrictedView):
         self.previous_button.disabled = self.page_index <= 0 or len(self.items) <= 25
         self.next_button.disabled = self.page_index >= self.page_count() - 1 or len(self.items) <= 25
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="הקודם", style=discord.ButtonStyle.secondary, row=1)
     async def previous_button(
         self,
         interaction: discord.Interaction,
@@ -151,7 +151,7 @@ class PaginatedSelectView(RestrictedView):
         self._refresh_components()
         await interaction.response.edit_message(view=self)
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="הבא", style=discord.ButtonStyle.secondary, row=1)
     async def next_button(
         self,
         interaction: discord.Interaction,

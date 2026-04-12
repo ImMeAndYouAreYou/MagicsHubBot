@@ -77,8 +77,12 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/checksystems`
 - `/revokesystem`
 - `/givesystem`
+- `/tempsave`
+- `/transfer`
+- `/claimrolepanel`
 - `/vouch`
 - `/vouches`
+- `/revokevouch`
 - `/link`
 
 ## Feature Overview
@@ -90,9 +94,12 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Blacklist appeals use a modal and a persistent owner-DM button view that survives bot restarts.
 - PayPal purchases create a pending purchase record and are completed by a webhook simulation endpoint that triggers automatic delivery.
 - Ownership is tracked in `user_systems` and can be granted, checked, or revoked.
+- Admins can save transferable ownership snapshots, transfer supported systems between Discord users without duplication, and permanently block old Roblox reclaims after transfer.
 - Vouches use a preview flow with edit support and publish to the configured vouch channel.
+- Admins can revoke individual vouches from a dropdown list and remove the posted vouch message from the configured channel.
 - Roblox OAuth uses an aiohttp callback server and stores linked Roblox profile data per Discord user.
 - `/getsystem` checks the linked Roblox account against the configured system gamepass using Roblox inventory ownership before delivering the system.
+- A persistent role-claim panel lets users self-assign the configured systems role when they qualify via admin-granted systems or matching Roblox gamepasses.
 - Incoming user DMs are forwarded to the configured owner for visibility.
 - The custom-order flow posts a button panel, collects a modal request, previews it to the user, and sends it to the owner DM with accept or reject buttons.
 
@@ -108,6 +115,8 @@ SQLite schema lives in `sales_bot/sql/schema.sql` and creates these primary tabl
 - `blacklist_appeals`
 - `paypal_purchases`
 - `vouches`
+- `temp_saved_systems`
+- `transfer_locks`
 - `oauth_states`
 - `roblox_links`
 

@@ -80,6 +80,26 @@ CREATE TABLE IF NOT EXISTS vouches (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS temp_saved_systems (
+    user_id INTEGER NOT NULL,
+    system_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    saved_by INTEGER,
+    saved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, system_id),
+    FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS transfer_locks (
+    user_id INTEGER NOT NULL,
+    system_id INTEGER NOT NULL,
+    locked_by INTEGER,
+    reason TEXT NOT NULL,
+    locked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, system_id),
+    FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS oauth_states (
     state TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
@@ -117,3 +137,5 @@ CREATE INDEX IF NOT EXISTS idx_blacklist_appeals_status ON blacklist_appeals(sta
 CREATE INDEX IF NOT EXISTS idx_paypal_purchases_status ON paypal_purchases(status);
 CREATE INDEX IF NOT EXISTS idx_vouches_admin_user ON vouches(admin_user_id);
 CREATE INDEX IF NOT EXISTS idx_order_requests_status ON order_requests(status);
+CREATE INDEX IF NOT EXISTS idx_temp_saved_systems_user ON temp_saved_systems(user_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_locks_user ON transfer_locks(user_id);

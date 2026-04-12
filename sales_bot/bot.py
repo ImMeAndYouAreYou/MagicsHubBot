@@ -23,6 +23,7 @@ from sales_bot.services.payments import PaymentService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
 from sales_bot.ui.appeals import AppealDecisionView
+from sales_bot.ui.ownership import ClaimRolePanelView
 from sales_bot.ui.orders import OrderDecisionView, OrderPanelView
 from sales_bot.web import create_web_app
 
@@ -96,6 +97,7 @@ class SalesBot(commands.Bot):
 
     async def _restore_persistent_views(self) -> None:
         self.add_view(OrderPanelView(self))
+        self.add_view(ClaimRolePanelView(self))
 
         pending_appeals = await self.services.blacklist.list_pending_appeals()
         for appeal in pending_appeals:

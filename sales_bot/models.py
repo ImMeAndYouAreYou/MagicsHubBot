@@ -17,6 +17,22 @@ class SystemRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class OwnedSystemRecord:
+    system: SystemRecord
+    source: str
+    granted_by: int | None
+    granted_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class SavedSystemRecord:
+    system: SystemRecord
+    source: str
+    saved_by: int | None
+    saved_at: str
+
+
+@dataclass(slots=True, frozen=True)
 class BlacklistEntry:
     user_id: int
     display_label: str
@@ -57,6 +73,17 @@ class DeliveryRecord:
     message_id: int
     source: str
     sent_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class VouchRecord:
+    id: int
+    admin_user_id: int
+    author_user_id: int
+    reason: str
+    rating: int
+    posted_message_id: int | None
+    created_at: str
 
 
 @dataclass(slots=True, frozen=True)

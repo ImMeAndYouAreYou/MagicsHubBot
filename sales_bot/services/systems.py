@@ -120,7 +120,7 @@ class SystemService:
         )
         embed.add_field(name="איידי של המערכת", value=str(system.id), inline=True)
         embed.add_field(name="פייפאל", value=system.paypal_link or "לא מוגדר", inline=False)
-        embed.add_field(name="גיימפאס רובוקס", value=self.gamepass_url_for_id(system.roblox_gamepass_id) or "לא מוגדר", inline=False)
+        embed.add_field(name="גיימפאס רובקס", value=self.gamepass_url_for_id(system.roblox_gamepass_id) or "לא מוגדר", inline=False)
         embed.set_footer(text="Magic System's")
         return embed
 

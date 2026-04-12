@@ -26,7 +26,8 @@ class DeliveryService:
         if await bot.services.blacklist.is_blacklisted(user.id):
             raise PermissionDeniedError("המשתמש הזה נמצא בבלאקליסט ולכן אי אפשר לשלוח לו מערכות.")
 
-        system_file_path = Path(system.file_path)
+        resolved_system_file = bot.services.systems.resolve_asset_path(system.file_path)
+        system_file_path = resolved_system_file or Path(system.file_path)
         if not system_file_path.is_file():
             raise NotFoundError(
                 "קובץ המערכת לא נמצא על השרת. אם זה קרה אחרי דיפלוי, צריך להשתמש באחסון קבוע או להעלות מחדש את המערכת."

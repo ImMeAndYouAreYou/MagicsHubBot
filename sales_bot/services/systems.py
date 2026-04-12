@@ -18,6 +18,7 @@ class SystemService:
     def __init__(self, database: Database, storage_root: Path) -> None:
         self.database = database
         self.storage_root = storage_root
+        self.data_root = self.storage_root.parent
         self.archive_root = self.storage_root.parent / "archive" / "systems"
         self.storage_root.mkdir(parents=True, exist_ok=True)
         self.archive_root.mkdir(parents=True, exist_ok=True)
@@ -50,8 +51,8 @@ class SystemService:
                 (
                     name.strip(),
                     description.strip(),
-                    str(image_path) if image_path else None,
-                    str(file_path),
+                    self.to_stored_asset_path(image_path) if image_path else None,
+                    self.to_stored_asset_path(file_path),
                     paypal_link.strip() if paypal_link else None,
                     roblox_gamepass_id,
                     created_by,
@@ -159,8 +160,49 @@ class SystemService:
             return None
         return f"https://www.roblox.com/game-pass/{gamepass_id}"
 
+    def to_stored_asset_path(self, path: str | Path | None) -> str | None:
+        if path is None:
+            return None
+
+        asset_path = Path(path)
+        try:
+            return str(asset_path.relative_to(self.data_root))
+        except ValueError:
+            return str(asset_path)
+
+    def resolve_asset_path(self, raw_path: str | Path | None) -> Path | None:
+        if raw_path is None:
+            return None
+
+        asset_path = Path(raw_path)
+        if asset_path.exists():
+            return asset_path
+
+        if not asset_path.is_absolute():
+            candidate = self.data_root / asset_path
+            if candidate.exists():
+                return candidate
+            return candidate
+
+        parts = list(asset_path.parts)
+        if "systems" in parts:
+            systems_index = parts.index("systems")
+            candidate = self.data_root.joinpath(*parts[systems_index:])
+            if candidate.exists():
+                return candidate
+            return candidate
+
+        if "archive" in parts:
+            archive_index = parts.index("archive")
+            candidate = self.data_root.joinpath(*parts[archive_index:])
+            if candidate.exists():
+                return candidate
+            return candidate
+
+        return asset_path
+
     def _archive_system_assets(self, system: SystemRecord) -> None:
-        file_path = Path(system.file_path)
+        file_path = self.resolve_asset_path(system.file_path) or Path(system.file_path)
         timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         archive_prefix = f"{slugify(system.name)}-{system.id}-{timestamp}"
 
@@ -170,8 +212,13 @@ class SystemService:
                 archive_path(folder, self.archive_root, archive_prefix)
                 return
 
-        archive_path(system.file_path, self.archive_root, f"{archive_prefix}-file{Path(system.file_path).suffix}")
-        archive_path(system.image_path, self.archive_root, f"{archive_prefix}-image{Path(system.image_path).suffix}" if system.image_path else None)
+        resolved_image_path = self.resolve_asset_path(system.image_path) if system.image_path else None
+        archive_path(file_path, self.archive_root, f"{archive_prefix}-file{file_path.suffix}")
+        archive_path(
+            resolved_image_path,
+            self.archive_root,
+            f"{archive_prefix}-image{resolved_image_path.suffix}" if resolved_image_path else None,
+        )
 
     @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:

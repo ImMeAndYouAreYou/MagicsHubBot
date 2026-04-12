@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,16 +27,19 @@ class DeliveryService:
         if await bot.services.blacklist.is_blacklisted(user.id):
             raise PermissionDeniedError("המשתמש הזה נמצא בבלאקליסט ולכן אי אפשר לשלוח לו מערכות.")
 
-        resolved_system_file = bot.services.systems.resolve_asset_path(system.file_path)
-        system_file_path = resolved_system_file or Path(system.file_path)
-        if not system_file_path.is_file():
-            raise NotFoundError(
-                "קובץ המערכת לא נמצא על השרת. אם זה קרה אחרי דיפלוי, צריך להשתמש באחסון קבוע או להעלות מחדש את המערכת."
-            )
-
         try:
             dm_channel = user.dm_channel or await user.create_dm()
-            system_file = discord.File(system_file_path, filename=system_file_path.name)
+            if bot.services.system_storage.is_supabase_path(system.file_path):
+                payload, filename = await bot.services.system_storage.download_bytes(system.file_path)
+                system_file = discord.File(BytesIO(payload), filename=filename)
+            else:
+                resolved_system_file = bot.services.systems.resolve_asset_path(system.file_path)
+                system_file_path = resolved_system_file or Path(system.file_path)
+                if not system_file_path.is_file():
+                    raise NotFoundError(
+                        "קובץ המערכת לא נמצא על השרת. אם זה קרה אחרי דיפלוי, צריך להשתמש באחסון קבוע או להעלות מחדש את המערכת."
+                    )
+                system_file = discord.File(system_file_path, filename=system_file_path.name)
             message = await dm_channel.send(
                 content=f"הנה המערכת שרצית להוריד {system.name}",
                 file=system_file,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import aiosqlite
 import asyncpg
@@ -11,17 +12,20 @@ import discord
 from sales_bot.db import Database
 from sales_bot.exceptions import AlreadyExistsError, ExternalServiceError, NotFoundError
 from sales_bot.models import SystemRecord
+from sales_bot.services.system_storage import SupabaseStorageService
 from sales_bot.storage import archive_path, remove_path, save_attachment, slugify
 
 
 class SystemService:
-    def __init__(self, database: Database, storage_root: Path) -> None:
+    def __init__(self, database: Database, storage_root: Path, system_storage: SupabaseStorageService) -> None:
         self.database = database
         self.storage_root = storage_root
+        self.system_storage = system_storage
         self.data_root = self.storage_root.parent
         self.archive_root = self.storage_root.parent / "archive" / "systems"
-        self.storage_root.mkdir(parents=True, exist_ok=True)
-        self.archive_root.mkdir(parents=True, exist_ok=True)
+        if not self.system_storage.is_configured:
+            self.storage_root.mkdir(parents=True, exist_ok=True)
+            self.archive_root.mkdir(parents=True, exist_ok=True)
 
     async def create_system(
         self,
@@ -35,11 +39,29 @@ class SystemService:
         roblox_gamepass_reference: str | None,
     ) -> SystemRecord:
         folder = self.storage_root / f"{slugify(name)}-{file_attachment.id}"
-        try:
-            file_path = await save_attachment(file_attachment, folder)
-            image_path = await save_attachment(image_attachment, folder) if image_attachment else None
-        except OSError as exc:
-            raise ExternalServiceError("לא הצלחתי לשמור את קבצי המערכת באחסון הקבוע.") from exc
+        storage_prefix = f"systems/{slugify(name)}-{file_attachment.id}"
+        if self.system_storage.is_configured:
+            try:
+                file_path = await self.system_storage.upload_attachment(
+                    file_attachment,
+                    f"{storage_prefix}/{uuid4().hex}_{file_attachment.filename}",
+                )
+                image_path = (
+                    await self.system_storage.upload_attachment(
+                        image_attachment,
+                        f"{storage_prefix}/{uuid4().hex}_{image_attachment.filename}",
+                    )
+                    if image_attachment
+                    else None
+                )
+            except OSError as exc:
+                raise ExternalServiceError("לא הצלחתי לשמור את קבצי המערכת ב-Supabase Storage.") from exc
+        else:
+            try:
+                file_path = await save_attachment(file_attachment, folder)
+                image_path = await save_attachment(image_attachment, folder) if image_attachment else None
+            except OSError as exc:
+                raise ExternalServiceError("לא הצלחתי לשמור את קבצי המערכת באחסון הקבוע.") from exc
         roblox_gamepass_id = self.normalize_gamepass_reference(roblox_gamepass_reference)
 
         try:
@@ -59,8 +81,9 @@ class SystemService:
                 ),
             )
         except (aiosqlite.IntegrityError, asyncpg.UniqueViolationError) as exc:
-            remove_path(file_path)
-            remove_path(image_path)
+            if not self.system_storage.is_configured:
+                remove_path(file_path)
+                remove_path(image_path)
             raise AlreadyExistsError("כבר קיימת מערכת עם השם הזה.") from exc
 
         return await self.get_system(system_id)
@@ -164,6 +187,9 @@ class SystemService:
         if path is None:
             return None
 
+        if isinstance(path, str) and self.system_storage.is_supabase_path(path):
+            return path
+
         asset_path = Path(path)
         try:
             return str(asset_path.relative_to(self.data_root))
@@ -172,6 +198,9 @@ class SystemService:
 
     def resolve_asset_path(self, raw_path: str | Path | None) -> Path | None:
         if raw_path is None:
+            return None
+
+        if isinstance(raw_path, str) and self.system_storage.is_supabase_path(raw_path):
             return None
 
         asset_path = Path(raw_path)
@@ -202,6 +231,9 @@ class SystemService:
         return asset_path
 
     def _archive_system_assets(self, system: SystemRecord) -> None:
+        if self.system_storage.is_supabase_path(system.file_path):
+            return
+
         file_path = self.resolve_asset_path(system.file_path) or Path(system.file_path)
         timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         archive_prefix = f"{slugify(system.name)}-{system.id}-{timestamp}"

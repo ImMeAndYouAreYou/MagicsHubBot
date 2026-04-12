@@ -149,6 +149,9 @@ Optional values:
 - `PORT`
 - `SQLITE_PATH`
 - `DATA_DIR`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_STORAGE_BUCKET`
 - `LOG_LEVEL`
 - `SYNC_COMMANDS_ON_STARTUP`
 - `DEV_GUILD_ID`
@@ -157,7 +160,7 @@ Optional values:
 
 If the Roblox OAuth variables are omitted, the bot still starts normally and the `/link` flow stays unavailable until those values are configured.
 
-If `DATABASE_URL` is configured, `DATA_DIR` must also be configured to a persistent folder. This is where uploaded system files and archives are stored.
+If `DATABASE_URL` is configured, use either a persistent `DATA_DIR` or configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` so uploaded system files are stored in Supabase Storage.
 
 ## Render
 
@@ -166,7 +169,7 @@ Render Web Service settings:
 - Build command: `pip install -r requirements.txt`
 - Start command: `python main.py`
 
-For production, mount a persistent disk in Render and set `DATA_DIR` to that mounted path. Without a persistent `DATA_DIR`, uploaded system files can be lost on redeploy.
+For production, either mount a persistent disk and point `DATA_DIR` at it, or configure Supabase Storage with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET`.
 
 The app now falls back to Render's `PORT` environment variable automatically, so `WEB_PORT=$PORT` is no longer required in the start command.
 

@@ -52,6 +52,9 @@ class Settings:
     sqlite_path: Path
     database_url: str | None
     data_dir: Path
+    supabase_url: str | None
+    supabase_service_role_key: str | None
+    supabase_storage_bucket: str | None
     log_level: str
     sync_commands_on_startup: bool
     dev_guild_id: int | None
@@ -71,6 +74,16 @@ class Settings:
             )
         )
 
+    @property
+    def supabase_storage_enabled(self) -> bool:
+        return all(
+            (
+                self.supabase_url,
+                self.supabase_service_role_key,
+                self.supabase_storage_bucket,
+            )
+        )
+
     @classmethod
     def from_env(cls) -> "Settings":
         base_dir = Path(__file__).resolve().parent.parent
@@ -87,10 +100,15 @@ class Settings:
             data_dir = sqlite_path.parent
 
         database_url = _optional_env("DATABASE_URL")
-        if database_url and not data_dir_raw:
+        supabase_url = _optional_env("SUPABASE_URL")
+        supabase_service_role_key = _optional_env("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_storage_bucket = _optional_env("SUPABASE_STORAGE_BUCKET")
+        supabase_storage_enabled = all((supabase_url, supabase_service_role_key, supabase_storage_bucket))
+
+        if database_url and not data_dir_raw and not supabase_storage_enabled:
             raise ConfigurationError(
-                "When DATABASE_URL is configured, DATA_DIR must also be set to persistent storage. "
-                "This prevents system files from being lost on redeploy."
+                "When DATABASE_URL is configured, you must configure either DATA_DIR for persistent disk storage "
+                "or SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET for Supabase Storage."
             )
 
         public_base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8080").rstrip("/")
@@ -119,6 +137,9 @@ class Settings:
             sqlite_path=sqlite_path,
             database_url=database_url,
             data_dir=data_dir,
+            supabase_url=supabase_url,
+            supabase_service_role_key=supabase_service_role_key,
+            supabase_storage_bucket=supabase_storage_bucket,
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             sync_commands_on_startup=_optional_bool("SYNC_COMMANDS_ON_STARTUP", True),
             dev_guild_id=_optional_int("DEV_GUILD_ID"),
@@ -126,7 +147,8 @@ class Settings:
             self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
         )
 
-        settings.data_dir.mkdir(parents=True, exist_ok=True)
-        (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)
-        (settings.data_dir / "archive").mkdir(parents=True, exist_ok=True)
+        if data_dir_raw or not settings.supabase_storage_enabled:
+            settings.data_dir.mkdir(parents=True, exist_ok=True)
+            (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)
+            (settings.data_dir / "archive").mkdir(parents=True, exist_ok=True)
         return settings

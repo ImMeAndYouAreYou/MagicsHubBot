@@ -88,6 +88,56 @@ PASSIVE_LEARNING_KEYWORDS = {
     "אסור",
     "מעתה",
 }
+DOMAIN_KNOWLEDGE_KEYWORDS = {
+    "roblox",
+    "discord",
+    "dm",
+    "paypal",
+    "robux",
+    "gamepass",
+    "system",
+    "systems",
+    "order",
+    "orders",
+    "support",
+    "poll",
+    "giveaway",
+    "vouch",
+    "blacklist",
+    "role",
+    "roles",
+    "channel",
+    "server",
+    "guild",
+    "ownership",
+    "transfer",
+    "payment",
+    "link",
+    "oauth",
+    "רובלוקס",
+    "דיסקורד",
+    "הודעה",
+    "פייפאל",
+    "רובקס",
+    "גיימפאס",
+    "מערכת",
+    "מערכות",
+    "הזמנה",
+    "הזמנות",
+    "תמיכה",
+    "סקר",
+    "גיבאווי",
+    "הוכחה",
+    "בלקליסט",
+    "רול",
+    "תפקיד",
+    "ערוץ",
+    "שרת",
+    "בעלות",
+    "העברה",
+    "תשלום",
+    "קישור",
+}
 HEBREW_ONLY_HINTS = {
     "עברית בלבד",
     "רק בעברית",
@@ -374,15 +424,16 @@ class AIAssistantService:
         content = message.content.strip()
         prepared_sources = list(text_sources or [])
         has_sources = bool(prepared_sources)
+        combined_context = "\n".join(part for part in [content, *prepared_sources[:2]] if part).strip()
         if not self._should_passively_learn(
-            message,
+            combined_context,
             author_is_admin=author_is_admin,
             has_sources=has_sources,
         ):
             return None
 
         parts: list[str] = ["Passive learned context."]
-        if content and self._should_store_passive_text(content, author_is_admin=author_is_admin):
+        if content and self._should_store_passive_text(combined_context, content, author_is_admin=author_is_admin):
             parts.append(f"Passive user note:\n{self._truncate(content, AUTO_LEARN_MAX_TEXT_CHARS)}")
 
         if prepared_sources:
@@ -988,6 +1039,7 @@ class AIAssistantService:
         tokens = set(TOKEN_PATTERN.findall(_normalize_text(question)))
         guides = self._match_command_guides(question)
         lines = self._collect_supporting_lines(tokens, knowledge, text_sources)
+        priority_lines = self._collect_priority_supporting_lines(tokens, knowledge, text_sources)
         is_hebrew_response = self._prefers_hebrew_response(question, response_profile)
 
         if not lines and not guides:
@@ -1000,14 +1052,14 @@ class AIAssistantService:
             quota_limited=quota_limited,
             image_unprocessed=image_unprocessed,
         )
-        scenario_body = self._build_scenario_answer(question, guides, lines, is_hebrew=is_hebrew_response)
+        scenario_body = self._build_scenario_answer(question, guides, priority_lines, is_hebrew=is_hebrew_response)
         if scenario_body:
             return self._apply_response_profile(
                 self._compose_local_answer(note, scenario_body),
                 response_profile,
             )
 
-        guide_body = self._build_command_guide_answer(guides, lines, is_hebrew=is_hebrew_response)
+        guide_body = self._build_command_guide_answer(guides, priority_lines, is_hebrew=is_hebrew_response)
         if guide_body:
             return self._apply_response_profile(
                 self._compose_local_answer(note, guide_body),
@@ -1055,6 +1107,42 @@ class AIAssistantService:
                 if len(lines) >= 8:
                     break
             if len(lines) >= 8:
+                break
+        return lines
+
+    def _collect_priority_supporting_lines(
+        self,
+        tokens: set[str],
+        knowledge: Sequence[AIKnowledgeRecord],
+        text_sources: Sequence[str],
+    ) -> list[str]:
+        lines: list[str] = []
+        seen: set[str] = set()
+
+        for record in knowledge:
+            if self._knowledge_kind(record) == "builtin":
+                continue
+            for line in self._relevant_lines(record.content, tokens):
+                normalized_line = _normalize_text(line)
+                if not normalized_line or normalized_line in seen:
+                    continue
+                seen.add(normalized_line)
+                lines.append(line)
+                if len(lines) >= 4:
+                    break
+            if len(lines) >= 4:
+                break
+
+        for source_text in text_sources[:2]:
+            for line in self._relevant_lines(source_text, tokens):
+                normalized_line = _normalize_text(line)
+                if not normalized_line or normalized_line in seen:
+                    continue
+                seen.add(normalized_line)
+                lines.append(line)
+                if len(lines) >= 6:
+                    break
+            if len(lines) >= 6:
                 break
         return lines
 
@@ -1248,59 +1336,6 @@ class AIAssistantService:
         scored.sort(key=lambda item: item[0], reverse=True)
         return [guide for _, guide in scored[:4]]
 
-    def _build_scenario_answer(self, question: str, guides: Sequence[CommandGuide]) -> str | None:
-        normalized = _normalize_text(question)
-        tokens = set(TOKEN_PATTERN.findall(normalized))
-        if not tokens:
-            return None
-
-        has_link_intent = bool(tokens & LINK_KEYWORDS)
-        has_buy_intent = bool(tokens & BUY_KEYWORDS)
-        has_receive_intent = bool(tokens & RECEIVE_KEYWORDS)
-        has_order_intent = bool(tokens & ORDER_KEYWORDS)
-        has_system_intent = bool(tokens & SYSTEM_KEYWORDS)
-
-        if has_link_intent and (has_buy_intent or has_receive_intent):
-            return self._build_flow_answer(
-                question,
-                ["link", "linkedaccount", "buywithpaypal", "buywithrobux", "getsystem"],
-                is_hebrew=is_hebrew,
-                title_he="לפי הזרימה שממומשת בבוט, זה הסדר הנכון:",
-                title_en="Based on the flow implemented in the bot, this is the right order:",
-            )
-
-        if has_buy_intent and has_receive_intent:
-            return self._build_flow_answer(
-                question,
-                ["buywithpaypal", "buywithrobux", "getsystem", "linkedaccount"],
-                is_hebrew=is_hebrew,
-                title_he="ככה קנייה ומסירה עובדות בבוט:",
-                title_en="This is how purchase and delivery work in the bot:",
-            )
-
-        if has_order_intent:
-            return self._build_flow_answer(
-                question,
-                ["sendorderpanel", "list"],
-                is_hebrew=is_hebrew,
-                title_he="ככה מערכת ההזמנות עובדת לפי הקוד של הבוט:",
-                title_en="This is how the order system works according to the bot code:",
-            )
-
-        if has_system_intent and any(keyword in normalized for keyword in {"edit", "add", "send", "remove", "admin", "לערוך", "להוסיף", "לשלוח", "אדמין"}):
-            return self._build_flow_answer(
-                question,
-                ["addsystem", "editsystem", "sendsystem", "systemslist"],
-                is_hebrew=is_hebrew,
-                title_he="ככה ניהול מערכות עובד בבוט:",
-                title_en="This is how system management works in the bot:",
-            )
-
-        if guides and self._is_how_to_question(tokens):
-            return self._build_command_guide_answer(question, guides, [])
-
-        return None
-
     def _build_scenario_answer(
         self,
         question: str,
@@ -1382,22 +1417,16 @@ class AIAssistantService:
         guide_map = {guide.name: guide for guide in self._load_command_guides()}
         lines: list[str] = [title_he if is_hebrew else title_en]
         step_number = 1
+        step_lines: list[str] = []
         for command_name in command_order:
             guide = guide_map.get(command_name)
             line = self._format_command_guide(guide, is_hebrew=is_hebrew) if guide is not None else None
             if not line:
                 continue
-            lines.append(f"{step_number}. {line}")
+            step_lines.append(f"{step_number}. {line}")
             step_number += 1
 
-        if is_hebrew and not self.settings.roblox_oauth_enabled and "link" in command_order:
-            lines.append("שים לב: `/link` יעבוד רק אם Roblox OAuth הוגדר במשתני הסביבה של הבוט.")
-        elif not is_hebrew and not self.settings.roblox_oauth_enabled and "link" in command_order:
-            lines.append("Note: `/link` only works after the Roblox OAuth environment variables are configured for the bot.")
-
-        extra_facts = self._build_supporting_fact_block(supporting_lines, is_hebrew=is_hebrew)
-        if extra_facts:
-            lines.append(extra_facts)
+        lines.extend(self._merge_supporting_lines_into_steps(step_lines, supporting_lines, command_order))
 
         return "\n".join(lines)
 
@@ -1411,41 +1440,93 @@ class AIAssistantService:
         if not guides:
             return None
 
-        intro = (
-            "לפי הפקודות והקוד של הבוט, זה מה שצריך לדעת:"
-            if is_hebrew
-            else "According to the bot commands and code, this is what you need to know:"
-        )
-        lines = [intro]
+        lines: list[str] = []
         for index, guide in enumerate(guides[:3], start=1):
             formatted = self._format_command_guide(guide, is_hebrew=is_hebrew)
             if formatted:
                 lines.append(f"{index}. {formatted}")
 
-        if supporting_lines:
-            extra_title = "עוד פרטים שמצאתי:" if is_hebrew else "Extra details I found:"
-            lines.append(extra_title)
-            for line in supporting_lines[:2]:
-                lines.append(f"- {self._truncate(line, 220)}")
+        for line in self._clean_supporting_lines(supporting_lines)[:2]:
+            lines.append(f"- {line}")
 
         return "\n".join(lines)
 
-    def _build_supporting_fact_block(self, supporting_lines: Sequence[str], *, is_hebrew: bool) -> str | None:
-        filtered_lines = [
-            self._truncate(line, 220)
-            for line in supporting_lines[:3]
-            if line
-            and not line.casefold().startswith("command /")
-            and not line.casefold().startswith("description /")
-            and not line.casefold().startswith("parameters /")
-            and not line.casefold().startswith("source file")
-            and not re.match(r"^[a-z_]+:\s", line)
+    def _merge_supporting_lines_into_steps(
+        self,
+        step_lines: Sequence[str],
+        supporting_lines: Sequence[str],
+        command_order: Sequence[str],
+    ) -> list[str]:
+        if not step_lines:
+            return []
+
+        cleaned_facts = self._clean_supporting_lines(supporting_lines)
+        if not cleaned_facts:
+            return list(step_lines)
+
+        enriched_lines = list(step_lines)
+        attached_counts = [0] * len(enriched_lines)
+        leftovers: list[str] = []
+
+        for fact in cleaned_facts[:4]:
+            target_index = self._choose_step_index_for_fact(fact, command_order)
+            if target_index is None or target_index >= len(enriched_lines):
+                leftovers.append(fact)
+                continue
+            if attached_counts[target_index] >= 1:
+                leftovers.append(fact)
+                continue
+            enriched_lines[target_index] = f"{enriched_lines[target_index]} {fact}"
+            attached_counts[target_index] += 1
+
+        for fact in leftovers[:2]:
+            enriched_lines.append(f"- {fact}")
+
+        return enriched_lines
+
+    def _choose_step_index_for_fact(self, fact: str, command_order: Sequence[str]) -> int | None:
+        normalized = _normalize_text(fact)
+        command_priority: list[tuple[set[str], tuple[str, ...]]] = [
+            (LINK_KEYWORDS, ("link", "linkedaccount")),
+            ({"paypal", "פייפאל", "payment", "webhook"}, ("buywithpaypal",)),
+            ({"robux", "רובקס", "gamepass", "גיימפאס"}, ("buywithrobux",)),
+            (RECEIVE_KEYWORDS | {"confirm", "approved", "אישור", "נשלחת", "ownership", "בעלות"}, ("getsystem", "linkedaccount")),
+            (ORDER_KEYWORDS, ("sendorderpanel", "list")),
+            (SYSTEM_KEYWORDS, ("addsystem", "editsystem", "sendsystem", "systemslist")),
         ]
-        if not filtered_lines:
-            return None
-        title = "חשוב גם לדעת:" if is_hebrew else "Also important:"
-        body = "\n".join(f"- {line}" for line in filtered_lines)
-        return f"{title}\n{body}"
+        for keyword_set, commands in command_priority:
+            if not any(keyword in normalized for keyword in keyword_set):
+                continue
+            for command_name in commands:
+                if command_name in command_order:
+                    return command_order.index(command_name)
+        return 0 if command_order else None
+
+    def _clean_supporting_lines(self, supporting_lines: Sequence[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw_line in supporting_lines:
+            line = self._truncate(raw_line.strip(), 220)
+            if not line:
+                continue
+            lowered = line.casefold()
+            if lowered.startswith(("command /", "description /", "parameters /", "source file")):
+                continue
+            if lowered.startswith(("access /", "behavior /", "attachment references")):
+                continue
+            if lowered.startswith(("trusted admin training entry", "admin training note", "passive learned context", "passive user note")):
+                continue
+            if lowered.startswith(("en:", "he:", "user:", "contexts:")):
+                continue
+            if "->" in line or "=>" in line or "→" in line:
+                continue
+            if re.match(r"^[a-z_]+:\s", line):
+                continue
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            cleaned.append(line.rstrip(". ") + ".")
+        return cleaned
 
     def _format_command_guide(self, guide: CommandGuide, *, is_hebrew: bool) -> str:
         detail = COMMAND_DETAIL_OVERRIDES.get(guide.name, {}).get("he" if is_hebrew else "en") or guide.description
@@ -1577,8 +1658,14 @@ class AIAssistantService:
             key=lambda item: len(item[0]),
             reverse=True,
         ):
-            pattern = re.compile(rf"(?<!/)\b{re.escape(source_term)}\b", re.IGNORECASE)
-            updated = pattern.sub(target_term, updated)
+            pattern = re.compile(re.escape(source_term), re.IGNORECASE)
+
+            def replace_match(match: re.Match[str]) -> str:
+                if match.start() > 0 and updated[match.start() - 1] == "/":
+                    return match.group(0)
+                return target_term
+
+            updated = pattern.sub(replace_match, updated)
         return updated
 
     def _extract_glossary_pairs(self, content: str) -> list[tuple[str, str]]:
@@ -1608,36 +1695,56 @@ class AIAssistantService:
 
     def _should_passively_learn(
         self,
-        message: discord.Message,
+        combined_context: str,
         *,
         author_is_admin: bool,
         has_sources: bool,
     ) -> bool:
-        content = message.content.strip()
+        content = combined_context.strip()
         if has_sources:
-            return True
+            return self._is_domain_relevant(content) and self._looks_like_reference_note(content)
         if not content:
             return False
         normalized = _normalize_text(content)
         if author_is_admin and self._is_instruction_like(content):
             return True
-        if len(content) < AUTO_LEARN_MIN_TEXT_CHARS:
+        if not self._is_domain_relevant(content):
             return False
-        if content.count("?") > 1 or normalized.startswith("/"):
+        if content.count("?") > 0 or normalized.startswith("/"):
             return False
-        if any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS):
-            return True
-        return author_is_admin and len(content.splitlines()) >= 2
+        if not self._looks_like_reference_note(content):
+            return False
+        if len(content) >= AUTO_LEARN_MIN_TEXT_CHARS:
+            return author_is_admin or any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS)
+        return any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS)
 
-    def _should_store_passive_text(self, content: str, *, author_is_admin: bool) -> bool:
-        normalized = _normalize_text(content)
+    def _should_store_passive_text(self, combined_context: str, content: str, *, author_is_admin: bool) -> bool:
+        normalized = _normalize_text(combined_context)
         if author_is_admin:
+            return self._is_domain_relevant(combined_context)
+        if not self._is_domain_relevant(combined_context):
+            return False
+        if content.count("?") > 0:
+            return False
+        if not self._looks_like_reference_note(combined_context):
+            return False
+        if len(content) >= AUTO_LEARN_MIN_TEXT_CHARS:
+            return any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS)
+        return any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS)
+
+    def _is_domain_relevant(self, content: str) -> bool:
+        normalized = _normalize_text(content)
+        if any(keyword in normalized for keyword in DOMAIN_KNOWLEDGE_KEYWORDS):
             return True
-        if len(content) < AUTO_LEARN_MIN_TEXT_CHARS:
-            return False
-        if content.count("?") > 1:
-            return False
-        return any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS) or len(content.splitlines()) >= 2
+        if COMMAND_PATTERN.search(content):
+            return True
+        return False
+
+    @staticmethod
+    def _looks_like_reference_note(content: str) -> bool:
+        sentence_count = sum(content.count(marker) for marker in (". ", "! ", "? ", "\n")) + 1
+        has_structure = any(marker in content for marker in ("->", "=>", "→", ":", "\n-", "\n•"))
+        return has_structure or sentence_count >= 2
 
     @staticmethod
     def _is_how_to_question(tokens: set[str]) -> bool:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -33,34 +34,35 @@ class AIAssistantService:
     def __init__(self, database: Database, settings: Settings) -> None:
         self.database = database
         self.settings = settings
+        self._cached_readme_knowledge: list[AIKnowledgeRecord] | None = None
 
     async def get_training_state(self) -> AITrainingStateRecord:
+        await self._ensure_training_state_row()
         row = await self.database.fetchone("SELECT * FROM ai_training_state WHERE id = 1")
-        if row is None:
-            await self.database.execute("INSERT INTO ai_training_state (id, is_active) VALUES (1, 0)")
-            row = await self.database.fetchone("SELECT * FROM ai_training_state WHERE id = 1")
         assert row is not None
         return self._map_training_state(row)
 
     async def start_training(self, admin_user_id: int) -> AITrainingStateRecord:
+        await self._ensure_training_state_row()
         await self.database.execute(
             """
             UPDATE ai_training_state
-            SET is_active = 1, started_by = ?, started_at = CURRENT_TIMESTAMP, ended_at = NULL
-            WHERE id = 1
+            SET is_active = ?, started_by = ?, started_at = CURRENT_TIMESTAMP, ended_at = NULL
+            WHERE id = ?
             """,
-            (admin_user_id,),
+            (True, admin_user_id, 1),
         )
         return await self.get_training_state()
 
     async def end_training(self) -> AITrainingStateRecord:
+        await self._ensure_training_state_row()
         await self.database.execute(
             """
             UPDATE ai_training_state
-            SET is_active = 0, ended_at = CURRENT_TIMESTAMP
-            WHERE id = 1
+            SET is_active = ?, ended_at = CURRENT_TIMESTAMP
+            WHERE id = ?
             """,
-            (),
+            (False, 1),
         )
         return await self.get_training_state()
 
@@ -105,10 +107,11 @@ class AIAssistantService:
         )
 
     async def search_knowledge(self, question: str, *, limit: int = 8) -> list[AIKnowledgeRecord]:
-        rows = await self.database.fetchall(
+        stored_rows = await self.database.fetchall(
             "SELECT * FROM ai_knowledge_entries ORDER BY created_at DESC LIMIT 500"
         )
-        records = [self._map_knowledge(row) for row in rows]
+        records = [self._map_knowledge(row) for row in stored_rows]
+        records.extend(await self._build_builtin_knowledge())
         normalized_question = _normalize_text(question)
         question_tokens = set(TOKEN_PATTERN.findall(normalized_question))
         if not question_tokens and normalized_question:
@@ -125,7 +128,12 @@ class AIAssistantService:
             scored_records.append((overlap + phrase_bonus, record))
 
         scored_records.sort(key=lambda item: item[0], reverse=True)
-        return [record for _, record in scored_records[:limit]]
+        top_records = [record for _, record in scored_records[:limit]]
+        if top_records:
+            return top_records
+
+        builtin_records = await self._build_builtin_knowledge()
+        return builtin_records[:limit]
 
     async def answer_question(self, session: aiohttp.ClientSession, question: str) -> str:
         knowledge = await self.search_knowledge(question)
@@ -155,6 +163,162 @@ class AIAssistantService:
             f"User question:\n{question.strip()}\n\n"
             f"Knowledge blocks:\n{'\n\n'.join(knowledge_blocks)}"
         )
+
+    async def _ensure_training_state_row(self) -> None:
+        row = await self.database.fetchone("SELECT 1 FROM ai_training_state WHERE id = 1")
+        if row is not None:
+            return
+        await self.database.execute(
+            "INSERT INTO ai_training_state (id, is_active) VALUES (?, ?)",
+            (1, False),
+        )
+
+    async def _build_builtin_knowledge(self) -> list[AIKnowledgeRecord]:
+        records: list[AIKnowledgeRecord] = []
+        records.extend(self._build_feature_knowledge())
+        records.extend(await self._build_system_catalog_knowledge())
+        records.extend(self._load_readme_knowledge())
+        return records
+
+    def _build_feature_knowledge(self) -> list[AIKnowledgeRecord]:
+        overview = (
+            "Magic Studio bot built-in knowledge / מידע מובנה של הבוט:\n"
+            "- Roblox linking / קישור רובלוקס: users can link with /link when Roblox OAuth is configured.\n"
+            "- System downloads / הורדת מערכות: /getsystem lets a user re-download owned systems or claim systems via a matching Roblox gamepass after linking.\n"
+            "- PayPal purchases / רכישת פייפאל: /buywithpaypal creates a pending purchase for systems that have a PayPal link configured.\n"
+            "- Robux purchases / רכישת רובקס: /buywithrobux opens the Roblox gamepass for systems that have a Roblox gamepass configured.\n"
+            "- Custom orders / הזמנות אישיות: admins can send the custom order panel with /sendorderpanel to the configured order channel.\n"
+            "- Ownership tools / כלי בעלות: admins can give, revoke, transfer, and inspect system ownership.\n"
+            "- Vouches / הוכחות: the bot supports vouch creation and publishing to the configured vouch channel.\n"
+            "- AI training / אימון AI: admins can start training mode with /trainbot and stop it with /endtraining."
+        )
+
+        config_summary = (
+            "Current bot configuration summary / סיכום תצורה:\n"
+            f"- Roblox OAuth enabled: {'yes' if self.settings.roblox_oauth_enabled else 'no'}.\n"
+            f"- AI support channel ID: {self.settings.ai_support_channel_id}.\n"
+            f"- Order channel ID: {self.settings.order_channel_id}.\n"
+            f"- Vouch channel ID: {self.settings.vouch_channel_id}.\n"
+            f"- Primary guild ID: {self.settings.primary_guild_id or 'not configured'}."
+        )
+
+        return [
+            AIKnowledgeRecord(
+                id=-1,
+                content=overview,
+                created_by=None,
+                source_channel_id=None,
+                source_message_id=None,
+                created_at="builtin",
+            ),
+            AIKnowledgeRecord(
+                id=-2,
+                content=config_summary,
+                created_by=None,
+                source_channel_id=None,
+                source_message_id=None,
+                created_at="builtin",
+            ),
+        ]
+
+    async def _build_system_catalog_knowledge(self) -> list[AIKnowledgeRecord]:
+        rows = await self.database.fetchall(
+            "SELECT id, name, description, paypal_link, roblox_gamepass_id FROM systems ORDER BY LOWER(name) ASC LIMIT 200"
+        )
+        if not rows:
+            return []
+
+        records: list[AIKnowledgeRecord] = []
+        for index, row in enumerate(rows, start=1):
+            payment_modes: list[str] = []
+            if row["paypal_link"]:
+                payment_modes.append("PayPal")
+            if row["roblox_gamepass_id"]:
+                payment_modes.append("Robux gamepass")
+            if not payment_modes:
+                payment_modes.append("manual/admin delivery only")
+
+            content = (
+                f"System / מערכת #{row['id']}: {row['name']}\n"
+                f"Description / תיאור: {row['description']}\n"
+                f"Purchase methods / דרכי רכישה: {', '.join(payment_modes)}\n"
+                f"Has PayPal link: {'yes' if row['paypal_link'] else 'no'}\n"
+                f"Has Roblox gamepass: {'yes' if row['roblox_gamepass_id'] else 'no'}"
+            )
+            records.append(
+                AIKnowledgeRecord(
+                    id=-(1000 + index),
+                    content=content,
+                    created_by=None,
+                    source_channel_id=None,
+                    source_message_id=None,
+                    created_at="builtin",
+                )
+            )
+
+        catalog_lines = [
+            f"- {row['name']}: {'PayPal' if row['paypal_link'] else ''}{' + ' if row['paypal_link'] and row['roblox_gamepass_id'] else ''}{'Robux gamepass' if row['roblox_gamepass_id'] else ''}".rstrip(': ')
+            for row in rows
+        ]
+        records.append(
+            AIKnowledgeRecord(
+                id=-999,
+                content=(
+                    "Current system catalog / קטלוג מערכות נוכחי:\n"
+                    + "\n".join(catalog_lines)
+                ),
+                created_by=None,
+                source_channel_id=None,
+                source_message_id=None,
+                created_at="builtin",
+            )
+        )
+        return records
+
+    def _load_readme_knowledge(self) -> list[AIKnowledgeRecord]:
+        if self._cached_readme_knowledge is not None:
+            return self._cached_readme_knowledge
+
+        readme_path = Path(__file__).resolve().parents[2] / "README.md"
+        if not readme_path.is_file():
+            self._cached_readme_knowledge = []
+            return self._cached_readme_knowledge
+
+        text = readme_path.read_text(encoding="utf-8")
+        sections: list[AIKnowledgeRecord] = []
+        heading = "README Overview"
+        buffer: list[str] = []
+        next_id = -2000
+
+        def flush_section() -> None:
+            nonlocal heading, buffer, next_id
+            content = "\n".join(buffer).strip()
+            if not content:
+                buffer = []
+                return
+            sections.append(
+                AIKnowledgeRecord(
+                    id=next_id,
+                    content=f"{heading}\n{content}",
+                    created_by=None,
+                    source_channel_id=None,
+                    source_message_id=None,
+                    created_at="builtin",
+                )
+            )
+            next_id -= 1
+            buffer = []
+
+        for line in text.splitlines():
+            if line.startswith("## "):
+                flush_section()
+                heading = line[3:].strip()
+                continue
+            buffer.append(line)
+
+        flush_section()
+        self._cached_readme_knowledge = sections
+        return sections
 
     async def _call_gemini(self, session: aiohttp.ClientSession, prompt: str) -> str:
         api_url = (

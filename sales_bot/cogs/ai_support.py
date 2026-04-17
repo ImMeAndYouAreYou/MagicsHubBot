@@ -44,7 +44,7 @@ class AISupportCog(commands.Cog):
         training_state = await self.bot.services.ai_assistant.get_training_state()
         if training_state.is_active:
             if await self.bot.services.admins.is_admin(message.author.id):
-                record = await self.bot.services.ai_assistant.add_training_message(message)
+                record = await self.bot.services.ai_assistant.add_training_message(message, self.bot.http_session)
                 if record is not None:
                     try:
                         await message.add_reaction("💾")
@@ -60,12 +60,22 @@ class AISupportCog(commands.Cog):
                     pass
             return
 
-        if not message.content.strip() or self.bot.http_session is None:
+        if self.bot.http_session is None:
+            return
+
+        has_supported_attachments = any(
+            (
+                attachment.content_type and attachment.content_type.startswith("image/")
+            ) or attachment.content_type and attachment.content_type.startswith("text/")
+            for attachment in message.attachments
+        )
+        has_links = "http://" in message.content or "https://" in message.content
+        if not message.content.strip() and not message.attachments and not has_links and not has_supported_attachments:
             return
 
         try:
             async with message.channel.typing():
-                answer = await self.bot.services.ai_assistant.answer_question(self.bot.http_session, message.content)
+                answer = await self.bot.services.ai_assistant.answer_message(self.bot.http_session, message)
         except ExternalServiceError as exc:
             try:
                 await message.reply(str(exc), mention_author=False)

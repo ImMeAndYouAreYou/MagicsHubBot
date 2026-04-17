@@ -145,7 +145,7 @@ class Settings:
             roblox_privacy_policy_url=roblox_privacy_policy_url,
             roblox_terms_url=roblox_terms_url,
             gemini_api_key=_optional_env("GEMINI_API_KEY"),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             public_base_url=public_base_url,
             paypal_webhook_token=_require_env("PAYPAL_WEBHOOK_TOKEN"),
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),

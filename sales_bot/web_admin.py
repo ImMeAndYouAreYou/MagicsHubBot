@@ -32,8 +32,8 @@ function buildOptionRow(label = '', emoji = '') {
     return `
         <div class="option-row">
             <input type="text" name="option_emoji" maxlength="32" placeholder="😀" value="${escapeHtml(emoji)}" required>
-            <input type="text" name="option_label" maxlength="120" placeholder="Option text" value="${escapeHtml(label)}" required>
-            <button type="button" class="ghost-button danger" onclick="removeOptionRow(this)">Remove</button>
+            <input type="text" name="option_label" maxlength="120" placeholder="טקסט האפשרות" value="${escapeHtml(label)}" required>
+            <button type="button" class="ghost-button danger" onclick="removeOptionRow(this)">הסר</button>
         </div>
     `;
 }
@@ -198,7 +198,7 @@ def _escape(value: Any) -> str:
 
 def _error_response(title: str, message: str, *, status: int) -> web.Response:
     body = f"""
-    <p class="eyebrow">Admin Panel</p>
+    <p class="eyebrow">פאנל ניהול</p>
     <h1>{_escape(title)}</h1>
     <div class="notice">{_escape(message)}</div>
     """
@@ -216,21 +216,21 @@ async def _authorize_panel_request(
     bot: SalesBot = request.app["bot"]
     token = request.query.get("token", "").strip()
     if not token:
-        raise PermissionDeniedError("Missing admin panel token.")
+        raise PermissionDeniedError("חסר טוקן גישה לפאנל הניהול.")
 
     session = await bot.services.panels.get_session(token, expected_panel_type=panel_type)
     if target_id is None and session.target_id is not None:
-        raise PermissionDeniedError("This admin panel link is for a different record.")
+        raise PermissionDeniedError("קישור פאנל הניהול הזה שייך לרשומה אחרת.")
     if target_id is not None and session.target_id != target_id:
-        raise PermissionDeniedError("This admin panel link does not match the requested record.")
+        raise PermissionDeniedError("קישור פאנל הניהול הזה לא תואם לרשומה שביקשת.")
     if not await bot.services.admins.is_admin(session.admin_user_id):
-        raise PermissionDeniedError("This admin panel link is no longer assigned to a bot admin.")
+        raise PermissionDeniedError("קישור פאנל הניהול הזה כבר לא משויך לאדמין של הבוט.")
     return bot, session.admin_user_id
 
 
 async def _list_text_channels(bot: "SalesBot") -> list[discord.TextChannel]:
     if bot.settings.primary_guild_id is None:
-        raise ConfigurationError("PRIMARY_GUILD_ID must be configured before using the admin web panels.")
+        raise ConfigurationError("חובה להגדיר PRIMARY_GUILD_ID לפני שימוש בפאנלי הניהול.")
 
     try:
         guild = bot.get_guild(bot.settings.primary_guild_id)
@@ -243,16 +243,16 @@ async def _list_text_channels(bot: "SalesBot") -> list[discord.TextChannel]:
                 channels = await guild.fetch_channels()
     except discord.Forbidden as exc:
         raise PermissionDeniedError(
-            "The bot does not have permission to load channels from PRIMARY_GUILD_ID."
+            "לבוט אין הרשאה לטעון ערוצים מתוך PRIMARY_GUILD_ID."
         ) from exc
     except discord.HTTPException as exc:
         raise ConfigurationError(
-            "I could not load channels from PRIMARY_GUILD_ID. Check that the ID is correct and the bot is in that server."
+            "לא הצלחתי לטעון ערוצים מתוך PRIMARY_GUILD_ID. בדקו שהמזהה נכון ושהבוט נמצא בשרת הזה."
         ) from exc
 
     text_channels = [channel for channel in channels if isinstance(channel, discord.TextChannel)]
     if not text_channels:
-        raise ConfigurationError("No text channels were found in the configured primary guild.")
+        raise ConfigurationError("לא נמצאו ערוצי טקסט בשרת הראשי שהוגדר.")
 
     return sorted(text_channels, key=lambda channel: (channel.position, channel.name.casefold()))
 
@@ -268,10 +268,15 @@ def _render_channel_options(channels: list[discord.TextChannel], selected_channe
 
 
 def _render_duration_unit_options(selected_unit: str) -> str:
-    units = ("minutes", "hours", "days", "weeks")
+    unit_labels = {
+        "minutes": "דקות",
+        "hours": "שעות",
+        "days": "ימים",
+        "weeks": "שבועות",
+    }
     return "\n".join(
-        f'<option value="{unit}"{" selected" if unit == selected_unit else ""}>{unit.title()}</option>'
-        for unit in units
+        f'<option value="{unit}"{" selected" if unit == selected_unit else ""}>{label}</option>'
+        for unit, label in unit_labels.items()
     )
 
 
@@ -283,17 +288,17 @@ def _message_link(bot: "SalesBot", channel_id: int, message_id: int | None) -> s
 
 def _render_success_body(title: str, message: str, *, record_id: int, message_url: str | None) -> str:
     link_html = (
-        f'<a class="link-button" href="{_escape(message_url)}" target="_blank" rel="noreferrer">Open Discord Message</a>'
+        f'<a class="link-button" href="{_escape(message_url)}" target="_blank" rel="noreferrer">פתח את ההודעה בדיסקורד</a>'
         if message_url
         else ""
     )
     return f"""
-    <p class="eyebrow">Admin Panel</p>
+    <p class="eyebrow">פאנל ניהול</p>
     <h1>{_escape(title)}</h1>
     <div class="notice success">{_escape(message)}</div>
     <div class="meta-card">
-        <p><strong>Stored ID:</strong> {_escape(record_id)}</p>
-        <p>You can use the stored ID later with the matching slash edit command.</p>
+        <p><strong>מזהה שמור:</strong> {_escape(record_id)}</p>
+        <p>אפשר להשתמש במזהה הזה אחר כך עם פקודת העריכה המתאימה.</p>
         <div class="actions">{link_html}</div>
     </div>
     """
@@ -353,52 +358,52 @@ def _render_poll_form(
         f"""
         <div class="option-row">
             <input type="text" name="option_emoji" maxlength="32" placeholder="😀" value="{_escape(option['emoji'])}" required>
-            <input type="text" name="option_label" maxlength="120" placeholder="Option text" value="{_escape(option['label'])}" required>
-            <button type="button" class="ghost-button danger" onclick="removeOptionRow(this)">Remove</button>
+            <input type="text" name="option_label" maxlength="120" placeholder="טקסט האפשרות" value="{_escape(option['label'])}" required>
+            <button type="button" class="ghost-button danger" onclick="removeOptionRow(this)">הסר</button>
         </div>
         """
         for option in values["options"]
     )
     error_html = f'<div class="notice">{_escape(error_text)}</div>' if error_text else ""
     return f"""
-    <p class="eyebrow">Admin Poll Builder</p>
-    <h1>{_escape(mode_label)} Poll</h1>
-    <p>Build a Discord-style poll with as many options as needed. Each option must have its own emoji.</p>
+    <p class="eyebrow">פאנל סקרים</p>
+    <h1>{_escape(mode_label)} סקר</h1>
+    <p>צרו או ערכו סקר בסגנון דיסקורד עם כמה אפשרויות שתרצו. לכל אפשרות חייב להיות אימוג'י משלה.</p>
     {error_html}
     <form method="post">
         <div class="grid">
             <label class="field field-wide">
-                <span>Question</span>
+                <span>שאלה</span>
                 <textarea name="question" required>{_escape(values['question'])}</textarea>
             </label>
             <label class="field">
-                <span>Send to Channel</span>
+                <span>שלח לערוץ</span>
                 <select name="channel_id" required>
                     {_render_channel_options(channels, values['channel_id'])}
                 </select>
             </label>
             <label class="field">
-                <span>Duration Value</span>
+                <span>משך זמן</span>
                 <input type="number" min="1" name="duration_value" value="{_escape(values['duration_value'])}" required>
             </label>
             <label class="field">
-                <span>Duration Unit</span>
+                <span>יחידת זמן</span>
                 <select name="duration_unit" required>
                     {_render_duration_unit_options(str(values['duration_unit']))}
                 </select>
             </label>
             <div class="field field-wide">
-                <span>Poll Options</span>
+                <span>אפשרויות הסקר</span>
                 <div class="option-list" id="poll-options">
                     {option_rows}
                 </div>
                 <div class="actions">
-                    <button type="button" class="ghost-button" onclick="addOptionRow()">Add Option</button>
+                    <button type="button" class="ghost-button" onclick="addOptionRow()">הוסף אפשרות</button>
                 </div>
             </div>
         </div>
         <div class="actions">
-            <button type="submit">{_escape(mode_label)} Poll</button>
+            <button type="submit">{_escape(mode_label)} סקר</button>
         </div>
     </form>
     {POLL_FORM_SCRIPT}
@@ -450,47 +455,47 @@ def _render_giveaway_form(
 ) -> str:
     error_html = f'<div class="notice">{_escape(error_text)}</div>' if error_text else ""
     return f"""
-    <p class="eyebrow">Admin Giveaway Builder</p>
-    <h1>{_escape(mode_label)} Giveaway</h1>
-    <p>Create or update a giveaway, choose the channel, duration, number of winners, and the requirement text shown in the embed.</p>
+    <p class="eyebrow">פאנל הגרלות</p>
+    <h1>{_escape(mode_label)} הגרלה</h1>
+    <p>צרו או ערכו הגרלה, בחרו לאיזה ערוץ לשלוח אותה, כמה זמן היא תימשך, כמה זוכים יהיו ומה יוצג בתנאים.</p>
     {error_html}
     <form method="post">
         <div class="grid">
             <label class="field field-wide">
-                <span>Giveaway Title</span>
+                <span>כותרת ההגרלה</span>
                 <input type="text" maxlength="180" name="title" value="{_escape(values['title'])}" required>
             </label>
             <label class="field field-wide">
-                <span>Description</span>
+                <span>תיאור</span>
                 <textarea name="description">{_escape(values['description'])}</textarea>
             </label>
             <label class="field field-wide">
-                <span>Requirements</span>
+                <span>דרישות</span>
                 <textarea name="requirements">{_escape(values['requirements'])}</textarea>
             </label>
             <label class="field">
-                <span>Send to Channel</span>
+                <span>שלח לערוץ</span>
                 <select name="channel_id" required>
                     {_render_channel_options(channels, values['channel_id'])}
                 </select>
             </label>
             <label class="field">
-                <span>Winner Count</span>
+                <span>מספר זוכים</span>
                 <input type="number" min="1" name="winner_count" value="{_escape(values['winner_count'])}" required>
             </label>
             <label class="field">
-                <span>Duration Value</span>
+                <span>משך זמן</span>
                 <input type="number" min="1" name="duration_value" value="{_escape(values['duration_value'])}" required>
             </label>
             <label class="field">
-                <span>Duration Unit</span>
+                <span>יחידת זמן</span>
                 <select name="duration_unit" required>
                     {_render_duration_unit_options(str(values['duration_unit']))}
                 </select>
             </label>
         </div>
         <div class="actions">
-            <button type="submit">{_escape(mode_label)} Giveaway</button>
+            <button type="submit">{_escape(mode_label)} הגרלה</button>
         </div>
     </form>
     """
@@ -668,7 +673,7 @@ async def _handle_poll_form(
         channels = await _list_text_channels(bot)
         values = _poll_form_defaults()
         if poll_id is not None:
-            values = _poll_values_from_record(await bot.services.polls.get_poll(poll_id))
+            values = _poll_values_from_record(await bot.services.polls.get_editable_poll(poll_id))
 
         if request.method == "POST":
             form_data = await request.post()
@@ -685,8 +690,8 @@ async def _handle_poll_form(
                         duration_value=values["duration_value"],
                         duration_unit=values["duration_unit"],
                     )
-                    success_title = f"Poll #{saved_poll.id} Created"
-                    success_message = "The poll was published successfully."
+                    success_title = f"הסקר #{saved_poll.id} נוצר"
+                    success_message = "הסקר פורסם בהצלחה."
                 else:
                     saved_poll = await bot.services.polls.update_poll(
                         bot,
@@ -697,8 +702,8 @@ async def _handle_poll_form(
                         duration_value=values["duration_value"],
                         duration_unit=values["duration_unit"],
                     )
-                    success_title = f"Poll #{saved_poll.id} Updated"
-                    success_message = "The poll message was updated successfully."
+                    success_title = f"הסקר #{saved_poll.id} עודכן"
+                    success_message = "הודעת הסקר עודכנה בהצלחה."
 
                 return admin_html_response(
                     success_title,
@@ -711,9 +716,9 @@ async def _handle_poll_form(
                 )
             except SalesBotError as exc:
                 return admin_html_response(
-                    "Poll Builder",
+                    "פאנל סקרים",
                     _render_poll_form(
-                        mode_label="Edit" if poll_id is not None else "Create",
+                        mode_label="ערוך" if poll_id is not None else "צור",
                         channels=channels,
                         values=values,
                         error_text=str(exc),
@@ -721,18 +726,18 @@ async def _handle_poll_form(
                 )
 
         return admin_html_response(
-            "Poll Builder",
+            "פאנל סקרים",
             _render_poll_form(
-                mode_label="Edit" if poll_id is not None else "Create",
+                mode_label="ערוך" if poll_id is not None else "צור",
                 channels=channels,
                 values=values,
             ),
         )
     except SalesBotError as exc:
-        return _error_response("Poll Builder", str(exc), status=400)
+        return _error_response("פאנל סקרים", str(exc), status=400)
     except Exception:
         LOGGER.exception("Unexpected poll panel failure")
-        return _error_response("Poll Builder", "An unexpected error occurred while loading the poll panel.", status=500)
+        return _error_response("פאנל סקרים", "אירעה שגיאה לא צפויה בזמן טעינת פאנל הסקרים.", status=500)
 
 
 async def _handle_giveaway_form(
@@ -746,7 +751,7 @@ async def _handle_giveaway_form(
         channels = await _list_text_channels(bot)
         values = _giveaway_form_defaults()
         if giveaway_id is not None:
-            values = _giveaway_values_from_record(await bot.services.giveaways.get_giveaway(giveaway_id))
+            values = _giveaway_values_from_record(await bot.services.giveaways.get_editable_giveaway(giveaway_id))
 
         if request.method == "POST":
             form_data = await request.post()
@@ -764,8 +769,8 @@ async def _handle_giveaway_form(
                         duration_value=values["duration_value"],
                         duration_unit=values["duration_unit"],
                     )
-                    success_title = f"Giveaway #{saved_giveaway.id} Created"
-                    success_message = "The giveaway was published successfully."
+                    success_title = f"ההגרלה #{saved_giveaway.id} נוצרה"
+                    success_message = "ההגרלה פורסמה בהצלחה."
                 else:
                     saved_giveaway = await bot.services.giveaways.update_giveaway(
                         bot,
@@ -778,8 +783,8 @@ async def _handle_giveaway_form(
                         duration_value=values["duration_value"],
                         duration_unit=values["duration_unit"],
                     )
-                    success_title = f"Giveaway #{saved_giveaway.id} Updated"
-                    success_message = "The giveaway message was updated successfully."
+                    success_title = f"ההגרלה #{saved_giveaway.id} עודכנה"
+                    success_message = "הודעת ההגרלה עודכנה בהצלחה."
 
                 return admin_html_response(
                     success_title,
@@ -792,9 +797,9 @@ async def _handle_giveaway_form(
                 )
             except SalesBotError as exc:
                 return admin_html_response(
-                    "Giveaway Builder",
+                    "פאנל הגרלות",
                     _render_giveaway_form(
-                        mode_label="Edit" if giveaway_id is not None else "Create",
+                        mode_label="ערוך" if giveaway_id is not None else "צור",
                         channels=channels,
                         values=values,
                         error_text=str(exc),
@@ -802,15 +807,15 @@ async def _handle_giveaway_form(
                 )
 
         return admin_html_response(
-            "Giveaway Builder",
+            "פאנל הגרלות",
             _render_giveaway_form(
-                mode_label="Edit" if giveaway_id is not None else "Create",
+                mode_label="ערוך" if giveaway_id is not None else "צור",
                 channels=channels,
                 values=values,
             ),
         )
     except SalesBotError as exc:
-        return _error_response("Giveaway Builder", str(exc), status=400)
+        return _error_response("פאנל הגרלות", str(exc), status=400)
     except Exception:
         LOGGER.exception("Unexpected giveaway panel failure")
-        return _error_response("Giveaway Builder", "An unexpected error occurred while loading the giveaway panel.", status=500)
+        return _error_response("פאנל הגרלות", "אירעה שגיאה לא צפויה בזמן טעינת פאנל ההגרלות.", status=500)

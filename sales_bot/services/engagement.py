@@ -29,6 +29,10 @@ DURATION_UNIT_ALIASES = {
 
 GIVEAWAY_ENTRY_EMOJI = "🎉"
 SYSTEM_RANDOM = random.SystemRandom()
+ACTIVE_STATUS_VALUES = {"active", "פעיל"}
+ENDED_STATUS_VALUES = {"ended", "הסתיים", "נסגר"}
+ACTIVE_STATUS_NORMALIZED = frozenset(value.casefold() for value in ACTIVE_STATUS_VALUES)
+ENDED_STATUS_NORMALIZED = frozenset(value.casefold() for value in ENDED_STATUS_VALUES)
 
 
 def _serialize_poll_options(options: Sequence[PollOption]) -> str:
@@ -48,13 +52,39 @@ def _parse_datetime(value: str | datetime) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _is_active_status(status: str) -> bool:
+    return status.strip().casefold() in ACTIVE_STATUS_NORMALIZED
+
+
+def _display_status(status: str) -> str:
+    normalized = status.strip().casefold()
+    if normalized in ACTIVE_STATUS_NORMALIZED:
+        return "פעיל"
+    if normalized in ENDED_STATUS_NORMALIZED:
+        return "הסתיים"
+    return status
+
+
+def _has_record_ended(*, status: str, ends_at: str | datetime, closed_at: str | None) -> bool:
+    if closed_at:
+        return True
+    if status.strip().casefold() in ENDED_STATUS_NORMALIZED:
+        return True
+    return _parse_datetime(ends_at) <= datetime.now(UTC)
+
+
+def _ensure_record_editable(*, message: str, status: str, ends_at: str | datetime, closed_at: str | None) -> None:
+    if _has_record_ended(status=status, ends_at=ends_at, closed_at=closed_at):
+        raise PermissionDeniedError(message)
+
+
 def _normalize_duration(duration_value: int, duration_unit: str) -> tuple[int, str, datetime]:
     if duration_value <= 0:
-        raise PermissionDeniedError("Duration must be greater than zero.")
+        raise PermissionDeniedError("משך הזמן חייב להיות גדול מאפס.")
 
     normalized_unit = DURATION_UNIT_ALIASES.get(duration_unit.strip().lower())
     if normalized_unit is None:
-        raise PermissionDeniedError("Duration unit must be minutes, hours, days, or weeks.")
+        raise PermissionDeniedError("יחידת הזמן חייבת להיות דקות, שעות, ימים או שבועות.")
 
     delta = timedelta(**{normalized_unit: duration_value})
     return duration_value, normalized_unit, datetime.now(UTC) + delta
@@ -79,7 +109,7 @@ def _chunk_lines(lines: Sequence[str], *, max_size: int = 1000) -> list[str]:
     if current:
         chunks.append("\n".join(current))
 
-    return chunks or ["No data available."]
+    return chunks or ["אין נתונים זמינים."]
 
 
 async def _resolve_text_channel(bot: "SalesBot", channel_id: int) -> discord.TextChannel:
@@ -88,7 +118,7 @@ async def _resolve_text_channel(bot: "SalesBot", channel_id: int) -> discord.Tex
         channel = await bot.fetch_channel(channel_id)
 
     if not isinstance(channel, discord.TextChannel):
-        raise ExternalServiceError("The selected channel must be a text channel the bot can post in.")
+        raise ExternalServiceError("הערוץ שנבחר חייב להיות ערוץ טקסט שהבוט יכול לפרסם בו.")
     return channel
 
 
@@ -151,6 +181,7 @@ class PollService:
         duration_unit: str,
     ) -> PollRecord:
         current = await self.get_poll(poll_id)
+        self._ensure_poll_editable(current)
         normalized_options = self._normalize_options(options)
         clean_question = self._normalize_question(question)
         duration_value, duration_unit, ends_at = _normalize_duration(duration_value, duration_unit)
@@ -163,7 +194,7 @@ class PollService:
             duration_value=duration_value,
             duration_unit=duration_unit,
             ends_at=ends_at.isoformat(),
-            status="פעיל",
+            status="active",
             result_json=None,
             created_by=current.created_by,
             created_at=current.created_at,
@@ -199,7 +230,7 @@ class PollService:
                 duration_value = ?,
                 duration_unit = ?,
                 ends_at = ?,
-                status = 'פעיל',
+                status = 'active',
                 result_json = NULL,
                 updated_at = CURRENT_TIMESTAMP,
                 closed_at = NULL
@@ -221,12 +252,17 @@ class PollService:
     async def get_poll(self, poll_id: int) -> PollRecord:
         row = await self.database.fetchone("SELECT * FROM polls WHERE id = ?", (poll_id,))
         if row is None:
-            raise NotFoundError("Poll not found.")
+            raise NotFoundError("הסקר לא נמצא.")
         return self._map_poll(row)
+
+    async def get_editable_poll(self, poll_id: int) -> PollRecord:
+        poll = await self.get_poll(poll_id)
+        self._ensure_poll_editable(poll)
+        return poll
 
     async def close_due_polls(self, bot: "SalesBot") -> int:
         rows = await self.database.fetchall(
-            "SELECT * FROM polls WHERE status = 'active' AND ends_at <= ? ORDER BY ends_at ASC",
+            "SELECT * FROM polls WHERE status IN ('active', 'פעיל') AND ends_at <= ? ORDER BY ends_at ASC",
             (datetime.now(UTC),),
         )
         finalized = 0
@@ -253,13 +289,13 @@ class PollService:
     def build_embed(self, poll: PollRecord) -> discord.Embed:
         ends_at = _parse_datetime(poll.ends_at)
         embed = discord.Embed(
-            title=f"Poll #{poll.id}",
+            title=f"סקר מספר #{poll.id}",
             description=poll.question,
-            color=discord.Color.blurple() if poll.status == "פעיל" else discord.Color.dark_grey(),
+            color=discord.Color.blurple() if _is_active_status(poll.status) else discord.Color.dark_grey(),
         )
-        embed.add_field(name="סטטוס", value=poll.status.title(), inline=True)
-        embed.add_field(name="איידי", value=str(poll.id), inline=True)
-        embed.add_field(name="מסתיים ב:", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
+        embed.add_field(name="סטטוס", value=_display_status(poll.status), inline=True)
+        embed.add_field(name="מזהה", value=str(poll.id), inline=True)
+        embed.add_field(name="מסתיים ב", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
 
         option_lines = [f"{option.emoji} {option.label}" for option in poll.options]
         for index, chunk in enumerate(_chunk_lines(option_lines), start=1):
@@ -269,7 +305,7 @@ class PollService:
         if poll.result_json:
             results = json.loads(poll.result_json)
             result_lines = [
-                f"{item['emoji']} {item['label']} - {item['votes']} הצבעה(ות)"
+                f"{item['emoji']} {item['label']} - {item['votes']} קולות"
                 for item in results
             ]
             for index, chunk in enumerate(_chunk_lines(result_lines), start=1):
@@ -290,7 +326,7 @@ class PollService:
                 await message.delete()
             except discord.HTTPException:
                 pass
-            raise ExternalServiceError("I couldn't add one or more of the selected poll emojis.") from exc
+            raise ExternalServiceError("לא הצלחתי להוסיף אחד או יותר מהאימוג'ים שנבחרו לסקר.") from exc
         return message
 
     async def _build_result_payload(self, bot: "SalesBot", poll: PollRecord) -> list[dict[str, Any]]:
@@ -316,14 +352,14 @@ class PollService:
 
     async def _fetch_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> discord.Message:
         if message_id is None:
-            raise NotFoundError("Poll message has not been published yet.")
+            raise NotFoundError("הודעת הסקר עדיין לא פורסמה.")
         channel = await _resolve_text_channel(bot, channel_id)
         try:
             return await channel.fetch_message(message_id)
         except discord.NotFound as exc:
-            raise NotFoundError("Poll message not found.") from exc
+            raise NotFoundError("הודעת הסקר לא נמצאה.") from exc
         except discord.HTTPException as exc:
-            raise ExternalServiceError("I couldn't fetch the poll message from Discord.") from exc
+            raise ExternalServiceError("לא הצלחתי להביא את הודעת הסקר מדיסקורד.") from exc
 
     async def _safe_delete_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> None:
         if message_id is None:
@@ -338,7 +374,7 @@ class PollService:
     def _normalize_question(question: str) -> str:
         cleaned = question.strip()
         if not cleaned:
-            raise PermissionDeniedError("Poll question cannot be empty.")
+            raise PermissionDeniedError("שאלת הסקר לא יכולה להיות ריקה.")
         return cleaned
 
     @staticmethod
@@ -351,14 +387,14 @@ class PollService:
             if not emoji and not label:
                 continue
             if not emoji or not label:
-                raise PermissionDeniedError("Each poll option needs both text and an emoji.")
+                raise PermissionDeniedError("כל אפשרות בסקר חייבת לכלול גם טקסט וגם אימוג'י.")
             if emoji in seen_emojis:
-                raise PermissionDeniedError("Each poll option must use a unique emoji.")
+                raise PermissionDeniedError("כל אפשרות בסקר חייבת להשתמש באימוג'י ייחודי.")
             seen_emojis.add(emoji)
             normalized.append(PollOption(emoji=emoji, label=label))
 
         if len(normalized) < 2:
-            raise PermissionDeniedError("Polls need at least two options.")
+            raise PermissionDeniedError("סקר חייב להכיל לפחות שתי אפשרויות.")
         return normalized
 
     @staticmethod
@@ -379,6 +415,15 @@ class PollService:
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             closed_at=str(row["closed_at"]) if row["closed_at"] else None,
+        )
+
+    @staticmethod
+    def _ensure_poll_editable(poll: PollRecord) -> None:
+        _ensure_record_editable(
+            message="אי אפשר לערוך סקר שכבר הסתיים.",
+            status=poll.status,
+            ends_at=poll.ends_at,
+            closed_at=poll.closed_at,
         )
 
 
@@ -459,6 +504,7 @@ class GiveawayService:
         duration_unit: str,
     ) -> GiveawayRecord:
         current = await self.get_giveaway(giveaway_id)
+        self._ensure_giveaway_editable(current)
         clean_title = self._normalize_title(title)
         clean_description = self._normalize_optional_text(description)
         clean_requirements = self._normalize_optional_text(requirements)
@@ -475,7 +521,7 @@ class GiveawayService:
             duration_value=duration_value,
             duration_unit=duration_unit,
             ends_at=ends_at.isoformat(),
-            status="פעיל",
+            status="active",
             result_json=None,
             created_by=current.created_by,
             created_at=current.created_at,
@@ -536,12 +582,17 @@ class GiveawayService:
     async def get_giveaway(self, giveaway_id: int) -> GiveawayRecord:
         row = await self.database.fetchone("SELECT * FROM giveaways WHERE id = ?", (giveaway_id,))
         if row is None:
-            raise NotFoundError("Giveaway not found.")
+            raise NotFoundError("ההגרלה לא נמצאה.")
         return self._map_giveaway(row)
+
+    async def get_editable_giveaway(self, giveaway_id: int) -> GiveawayRecord:
+        giveaway = await self.get_giveaway(giveaway_id)
+        self._ensure_giveaway_editable(giveaway)
+        return giveaway
 
     async def close_due_giveaways(self, bot: "SalesBot") -> int:
         rows = await self.database.fetchall(
-            "SELECT * FROM giveaways WHERE status = 'active' AND ends_at <= ? ORDER BY ends_at ASC",
+            "SELECT * FROM giveaways WHERE status IN ('active', 'פעיל') AND ends_at <= ? ORDER BY ends_at ASC",
             (datetime.now(UTC),),
         )
         finalized = 0
@@ -578,12 +629,12 @@ class GiveawayService:
         ends_at = _parse_datetime(giveaway.ends_at)
         embed = discord.Embed(
             title=f"🎉 הגרלה מספר #{giveaway.id}: {giveaway.title}",
-            description=giveaway.description or "לחצו על הריאקשן 🎉 בכדי להכנס להגרלה.",
-            color=discord.Color.green() if giveaway.status == "פעיל" else discord.Color.dark_grey(),
+            description=giveaway.description or "לחצו על הריאקשן 🎉 כדי להצטרף להגרלה.",
+            color=discord.Color.green() if _is_active_status(giveaway.status) else discord.Color.dark_grey(),
         )
-        embed.add_field(name="סטטוס", value=giveaway.status.title(), inline=True)
-        embed.add_field(name="ID", value=str(giveaway.id), inline=True)
-        embed.add_field(name="זוכים", value=str(giveaway.winner_count), inline=True)
+        embed.add_field(name="סטטוס", value=_display_status(giveaway.status), inline=True)
+        embed.add_field(name="מזהה", value=str(giveaway.id), inline=True)
+        embed.add_field(name="כמות זוכים", value=str(giveaway.winner_count), inline=True)
         embed.add_field(name="מסתיים ב", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
         embed.add_field(name="כיצד להצטרף", value=f"לחצו על הריאקשן {GIVEAWAY_ENTRY_EMOJI}", inline=False)
         embed.add_field(name="דרישות", value=giveaway.requirements or "אין דרישות נוספות.", inline=False)
@@ -612,7 +663,7 @@ class GiveawayService:
                 await message.delete()
             except discord.HTTPException:
                 pass
-            raise ExternalServiceError("I couldn't add the giveaway entry reaction.") from exc
+            raise ExternalServiceError("לא הצלחתי להוסיף את ריאקשן ההצטרפות להגרלה.") from exc
         return message
 
     async def _build_result_payload(self, bot: "SalesBot", giveaway: GiveawayRecord) -> dict[str, Any]:
@@ -638,14 +689,14 @@ class GiveawayService:
 
     async def _fetch_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> discord.Message:
         if message_id is None:
-            raise NotFoundError("Giveaway message has not been published yet.")
+            raise NotFoundError("הודעת ההגרלה עדיין לא פורסמה.")
         channel = await _resolve_text_channel(bot, channel_id)
         try:
             return await channel.fetch_message(message_id)
         except discord.NotFound as exc:
-            raise NotFoundError("Giveaway message not found.") from exc
+            raise NotFoundError("הודעת ההגרלה לא נמצאה.") from exc
         except discord.HTTPException as exc:
-            raise ExternalServiceError("I couldn't fetch the giveaway message from Discord.") from exc
+            raise ExternalServiceError("לא הצלחתי להביא את הודעת ההגרלה מדיסקורד.") from exc
 
     async def _safe_delete_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> None:
         if message_id is None:
@@ -660,7 +711,7 @@ class GiveawayService:
     def _normalize_title(title: str) -> str:
         cleaned = title.strip()
         if not cleaned:
-            raise PermissionDeniedError("Giveaway title cannot be empty.")
+            raise PermissionDeniedError("כותרת ההגרלה לא יכולה להיות ריקה.")
         return cleaned
 
     @staticmethod
@@ -673,7 +724,7 @@ class GiveawayService:
     @staticmethod
     def _normalize_winner_count(winner_count: int) -> int:
         if winner_count <= 0:
-            raise PermissionDeniedError("Giveaway winner count must be greater than zero.")
+            raise PermissionDeniedError("כמות הזוכים בהגרלה חייבת להיות גדולה מאפס.")
         return winner_count
 
     @staticmethod
@@ -695,4 +746,13 @@ class GiveawayService:
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             closed_at=str(row["closed_at"]) if row["closed_at"] else None,
+        )
+
+    @staticmethod
+    def _ensure_giveaway_editable(giveaway: GiveawayRecord) -> None:
+        _ensure_record_editable(
+            message="אי אפשר לערוך הגרלה שכבר הסתיימה.",
+            status=giveaway.status,
+            ends_at=giveaway.ends_at,
+            closed_at=giveaway.closed_at,
         )

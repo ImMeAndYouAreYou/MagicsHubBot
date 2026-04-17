@@ -34,7 +34,10 @@ class Database:
 
     async def connect(self) -> None:
         if self.database_url:
-            self._pg_connection = await asyncpg.connect(self.database_url)
+            self._pg_connection = await asyncpg.connect(
+                self.database_url,
+                statement_cache_size=0,
+            )
             schema_path = self.schema_path.with_name("schema_postgres.sql")
             schema = schema_path.read_text(encoding="utf-8")
             await self._pg_connection.execute(schema)

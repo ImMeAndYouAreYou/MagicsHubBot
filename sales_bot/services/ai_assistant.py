@@ -847,21 +847,21 @@ class AIAssistantService:
                 return self._fallback_rate_limited_answer(question, image_only=True)
             return self._fallback_unknown_answer(question)
 
-        prefix = self._build_local_prefix(question, quota_limited=quota_limited, image_unprocessed=image_unprocessed)
+        note = self._build_local_note(question, quota_limited=quota_limited, image_unprocessed=image_unprocessed)
         scenario_body = self._build_scenario_answer(question, guides)
         if scenario_body:
-            return "\n\n".join([prefix, scenario_body])
+            return self._compose_local_answer(note, scenario_body)
 
         guide_body = self._build_command_guide_answer(question, guides, lines)
         if guide_body:
-            return "\n\n".join([prefix, guide_body])
+            return self._compose_local_answer(note, guide_body)
 
         if _contains_hebrew(question):
             header = "הנה הפרטים הכי רלוונטיים שמצאתי בקוד ובמידע של הבוט:"
         else:
             header = "Here are the most relevant details I found in the bot code and data:"
         body = "\n".join(f"- {self._truncate(line, 220)}" for line in lines[:8])
-        return "\n\n".join([prefix, header + "\n" + body])
+        return self._compose_local_answer(note, header + "\n" + body)
 
     def _collect_supporting_lines(
         self,
@@ -1173,13 +1173,11 @@ class AIAssistantService:
             return "פרמטרים חשובים: " + ", ".join(labels)
         return "important parameters: " + ", ".join(labels)
 
-    def _build_local_prefix(self, question: str, *, quota_limited: bool, image_unprocessed: bool) -> str:
+    def _build_local_note(self, question: str, *, quota_limited: bool, image_unprocessed: bool) -> str | None:
         if _contains_hebrew(question):
-            header = "עניתי מתוך הנתונים המקומיים, הפקודות והקוד של הבוט."
             quota_note = "מכסת Gemini כרגע מוגבלת, אז לא השתמשתי בתשובה חיצונית."
             image_note = "עיבוד תמונה חי לא היה זמין כרגע, אז נשענתי רק על הטקסט והקוד המקומי."
         else:
-            header = "I answered from the bot's local data, commands, and source code."
             quota_note = "Gemini quota is limited right now, so I did not rely on an external AI response."
             image_note = "Live image processing was not available right now, so I relied only on local text and source code."
 
@@ -1188,8 +1186,15 @@ class AIAssistantService:
             parts.append(quota_note)
         if image_unprocessed:
             parts.append(image_note)
-        parts.append(header)
+        if not parts:
+            return None
         return " ".join(parts)
+
+    @staticmethod
+    def _compose_local_answer(note: str | None, body: str) -> str:
+        if note:
+            return "\n\n".join([note, body])
+        return body
 
     @staticmethod
     def _is_how_to_question(tokens: set[str]) -> bool:

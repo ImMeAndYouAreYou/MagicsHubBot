@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import base64
 import html as html_lib
@@ -7,6 +8,7 @@ import ipaddress
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 from urllib.parse import urlparse
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9\u0590-\u05FF_]{2,}")
 URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+COMMAND_PATTERN = re.compile(r"/([a-z0-9_]+)")
 TEXT_FILE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -59,6 +62,152 @@ TRAINING_IMAGE_SUMMARY_TOKENS = 320
 GEMINI_PRIMARY_MODEL = "gemini-2.5-flash"
 GEMINI_FALLBACK_MODELS = ("gemini-2.5-flash",)
 
+HOW_TO_KEYWORDS = {
+    "how",
+    "steps",
+    "guide",
+    "explain",
+    "איך",
+    "שלבים",
+    "מדריך",
+    "להסביר",
+    "עושים",
+    "לעשות",
+}
+LINK_KEYWORDS = {
+    "roblox",
+    "link",
+    "linked",
+    "oauth",
+    "קישור",
+    "לקשר",
+    "לחבר",
+    "מחבר",
+    "חיבור",
+    "להתחבר",
+    "רובלוקס",
+    "מקושר",
+    "שם",
+    "username",
+    "nickname",
+}
+BUY_KEYWORDS = {
+    "buy",
+    "purchase",
+    "paypal",
+    "robux",
+    "gamepass",
+    "לקנות",
+    "קונה",
+    "קניה",
+    "קנייה",
+    "תשלום",
+    "פייפאל",
+    "רובקס",
+    "גיימפאס",
+}
+RECEIVE_KEYWORDS = {
+    "receive",
+    "delivery",
+    "deliver",
+    "dm",
+    "get",
+    "מקבל",
+    "אקבל",
+    "לקבל",
+    "לקחת",
+    "נשלח",
+    "נשלחת",
+}
+ORDER_KEYWORDS = {"order", "orders", "custom", "panel", "הזמנה", "הזמנות", "אישית"}
+SYSTEM_KEYWORDS = {"system", "systems", "מערכת", "מערכות", "file", "קובץ"}
+
+COMMAND_DETAIL_OVERRIDES: dict[str, dict[str, str]] = {
+    "link": {
+        "en": "Opens a Roblox authorization button. After approval, the bot stores the linked Roblox account and in the primary guild it tries to sync the member nickname and assign the verified Roblox role.",
+        "he": "פותח כפתור הרשאה ל-Roblox. אחרי האישור הבוט שומר את החשבון המקושר, ובשרת הראשי מנסה לעדכן את הכינוי ולתת את רול האימות של Roblox.",
+    },
+    "linkedaccount": {
+        "en": "Shows the Roblox account currently linked to the user, including the Roblox ID, username, display name, link time, and profile link.",
+        "he": "מציג את חשבון ה-Roblox שמקושר כרגע למשתמש, כולל Roblox ID, שם משתמש, Display Name, זמן הקישור וקישור לפרופיל.",
+    },
+    "checkroblox": {
+        "en": "Admin lookup for another user's linked Roblox profile. It also shows the linked profile details and the systems that Discord user currently owns.",
+        "he": "בדיקת אדמין לחשבון ה-Roblox המקושר של משתמש אחר. הפקודה מציגה את פרטי הפרופיל המקושר וגם את המערכות שיש לאותו משתמש ב-Discord.",
+    },
+    "systemslist": {
+        "en": "Lists every stored system in the bot. This command requires a linked Roblox account first.",
+        "he": "מציג את כל המערכות ששמורות בבוט. הפקודה הזאת דורשת קודם חשבון Roblox מקושר.",
+    },
+    "addsystem": {
+        "en": "Admin-only system creation. It stores the main file, optional image, optional PayPal link, and optional Roblox gamepass reference for delivery and purchase flows.",
+        "he": "יצירת מערכת לאדמינים בלבד. הפקודה שומרת את הקובץ הראשי, תמונה אופציונלית, קישור PayPal אופציונלי והפניה אופציונלית לגיימפאס Roblox לצורך מסירה ורכישה.",
+    },
+    "editsystem": {
+        "en": "Admin-only system edit flow. It opens the web edit panel where the name, description, file, image, PayPal link, and Roblox gamepass can be changed.",
+        "he": "זרימת עריכת מערכת לאדמינים בלבד. היא פותחת פאנל ווב שבו אפשר לשנות שם, תיאור, קובץ, תמונה, קישור PayPal וגיימפאס Roblox.",
+    },
+    "sendsystem": {
+        "en": "Admin-only direct delivery. It sends the chosen system to the target user in DM and records ownership.",
+        "he": "מסירה ישירה לאדמינים בלבד. הפקודה שולחת את המערכת שנבחרה למשתמש ב-DM ורושמת בעלות.",
+    },
+    "buywithpaypal": {
+        "en": "Lets a linked user choose a system that has a PayPal link. The bot creates a pending purchase and sends a PayPal button. After the webhook confirms payment, the system is delivered automatically by DM.",
+        "he": "מאפשרת למשתמש מקושר לבחור מערכת שיש לה קישור PayPal. הבוט יוצר רכישה ממתינה ושולח כפתור PayPal. אחרי שה-webhook מאשר את התשלום, המערכת נשלחת אוטומטית ב-DM.",
+    },
+    "buywithrobux": {
+        "en": "Lets a linked user choose a system that has a Roblox gamepass. The bot sends the gamepass button so the user can buy it in Roblox.",
+        "he": "מאפשרת למשתמש מקושר לבחור מערכת שיש לה גיימפאס Roblox. הבוט שולח כפתור גיימפאס כדי שהמשתמש יוכל לקנות אותו ב-Roblox.",
+    },
+    "getsystem": {
+        "en": "Checks whether the user already owns the system or whether the linked Roblox account owns the matching gamepass. If the check succeeds, the system is delivered by DM.",
+        "he": "בודקת אם למשתמש כבר יש את המערכת או אם לחשבון ה-Roblox המקושר יש את הגיימפאס המתאים. אם הבדיקה מצליחה, המערכת נשלחת ב-DM.",
+    },
+    "sendorderpanel": {
+        "en": "Admin-only command that posts the custom-order panel in the configured order channel.",
+        "he": "פקודה לאדמינים בלבד ששולחת את פאנל ההזמנות האישיות לערוץ ההזמנות המוגדר.",
+    },
+    "list": {
+        "en": "Admin order-management command. It opens the active order list and sends the selected order details to the admin's DM.",
+        "he": "פקודת ניהול הזמנות לאדמינים. היא פותחת את רשימת ההזמנות הפעילות ושולחת את פרטי ההזמנה שנבחרה ל-DM של האדמין.",
+    },
+    "vouch": {
+        "en": "Opens the vouch creation modal for a seller/admin in the bot.",
+        "he": "פותחת חלון יצירת הוכחה עבור מוכר או אדמין שקיים בבוט.",
+    },
+    "vouches": {
+        "en": "Shows the total vouches and average rating for the selected seller/admin.",
+        "he": "מציגה את סך ההוכחות ואת הדירוג הממוצע של המוכר או האדמין שנבחר.",
+    },
+    "poll": {
+        "en": "Admin-only poll creation. It opens the web poll panel used to build and publish a stored poll.",
+        "he": "יצירת סקר לאדמינים בלבד. היא פותחת את פאנל הווב של הסקרים כדי לבנות ולפרסם סקר שמור.",
+    },
+    "giveaway": {
+        "en": "Admin-only giveaway creation. It opens the web giveaway panel used to build and publish a stored giveaway.",
+        "he": "יצירת גיבאווי לאדמינים בלבד. היא פותחת את פאנל הווב של הגיבאווי כדי לבנות ולפרסם גיבאווי שמור.",
+    },
+    "trainbot": {
+        "en": "Admin-only training mode. While it is active, admins can feed messages, files, links, and screenshots into the AI knowledge base and normal AI replies are paused.",
+        "he": "מצב אימון לאדמינים בלבד. בזמן שהוא פעיל, אדמינים יכולים להזין הודעות, קבצים, קישורים וצילומי מסך למאגר הידע של ה-AI, והתגובות הרגילות של ה-AI נעצרות.",
+    },
+    "endtraining": {
+        "en": "Turns training mode off so the AI starts answering again in the support channel.",
+        "he": "מכבה את מצב האימון כדי שה-AI יחזור לענות בערוץ התמיכה.",
+    },
+}
+
+
+@dataclass(slots=True)
+class CommandGuide:
+    name: str
+    description: str
+    admin_only: bool
+    linked_roblox_required: bool
+    allowed_contexts: tuple[str, ...]
+    parameter_descriptions: dict[str, str]
+    source_file: str
+
 
 def _normalize_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).casefold().strip()
@@ -73,6 +222,7 @@ class AIAssistantService:
         self.database = database
         self.settings = settings
         self._cached_readme_knowledge: list[AIKnowledgeRecord] | None = None
+        self._cached_command_guides: list[CommandGuide] | None = None
 
     async def get_training_state(self) -> AITrainingStateRecord:
         await self._ensure_training_state_row()
@@ -269,8 +419,51 @@ class AIAssistantService:
     async def _build_builtin_knowledge(self) -> list[AIKnowledgeRecord]:
         records: list[AIKnowledgeRecord] = []
         records.extend(self._build_feature_knowledge())
+        records.extend(self._build_command_catalog_knowledge())
         records.extend(await self._build_system_catalog_knowledge())
         records.extend(self._load_readme_knowledge())
+        return records
+
+    def _build_command_catalog_knowledge(self) -> list[AIKnowledgeRecord]:
+        records: list[AIKnowledgeRecord] = []
+        for index, guide in enumerate(self._load_command_guides(), start=1):
+            access_parts: list[str] = []
+            if guide.admin_only:
+                access_parts.append("admin-only")
+            if guide.linked_roblox_required:
+                access_parts.append("requires linked Roblox account")
+            if guide.allowed_contexts:
+                access_parts.append("contexts: " + ", ".join(guide.allowed_contexts))
+            access_summary = "; ".join(access_parts) if access_parts else "standard access"
+            parameter_summary = "\n".join(
+                f"- {name}: {description}"
+                for name, description in list(guide.parameter_descriptions.items())[:3]
+            )
+            content = (
+                f"Command / פקודה: /{guide.name}\n"
+                f"Description / תיאור: {guide.description or 'No description provided.'}\n"
+                f"Access / גישה: {access_summary}\n"
+                f"Source file: {guide.source_file}"
+            )
+            if parameter_summary:
+                content += f"\nParameters / פרמטרים:\n{parameter_summary}"
+            detail_override = COMMAND_DETAIL_OVERRIDES.get(guide.name)
+            if detail_override:
+                content += (
+                    f"\nBehavior / התנהגות:\n"
+                    f"- EN: {detail_override.get('en', '').strip()}\n"
+                    f"- HE: {detail_override.get('he', '').strip()}"
+                )
+            records.append(
+                AIKnowledgeRecord(
+                    id=-(3000 + index),
+                    content=content,
+                    created_by=None,
+                    source_channel_id=None,
+                    source_message_id=None,
+                    created_at="builtin",
+                )
+            )
         return records
 
     def _build_feature_knowledge(self) -> list[AIKnowledgeRecord]:
@@ -646,6 +839,36 @@ class AIAssistantService:
         image_unprocessed: bool = False,
     ) -> str:
         tokens = set(TOKEN_PATTERN.findall(_normalize_text(question)))
+        guides = self._match_command_guides(question)
+        lines = self._collect_supporting_lines(tokens, knowledge, text_sources)
+
+        if not lines and not guides:
+            if image_unprocessed:
+                return self._fallback_rate_limited_answer(question, image_only=True)
+            return self._fallback_unknown_answer(question)
+
+        prefix = self._build_local_prefix(question, quota_limited=quota_limited, image_unprocessed=image_unprocessed)
+        scenario_body = self._build_scenario_answer(question, guides)
+        if scenario_body:
+            return "\n\n".join([prefix, scenario_body])
+
+        guide_body = self._build_command_guide_answer(question, guides, lines)
+        if guide_body:
+            return "\n\n".join([prefix, guide_body])
+
+        if _contains_hebrew(question):
+            header = "הנה הפרטים הכי רלוונטיים שמצאתי בקוד ובמידע של הבוט:"
+        else:
+            header = "Here are the most relevant details I found in the bot code and data:"
+        body = "\n".join(f"- {self._truncate(line, 220)}" for line in lines[:8])
+        return "\n\n".join([prefix, header + "\n" + body])
+
+    def _collect_supporting_lines(
+        self,
+        tokens: set[str],
+        knowledge: Sequence[AIKnowledgeRecord],
+        text_sources: Sequence[str],
+    ) -> list[str]:
         lines: list[str] = []
         seen: set[str] = set()
 
@@ -672,30 +895,7 @@ class AIAssistantService:
                     break
             if len(lines) >= 8:
                 break
-
-        if not lines:
-            if image_unprocessed:
-                return self._fallback_rate_limited_answer(question, image_only=True)
-            return self._fallback_unknown_answer(question)
-
-        if _contains_hebrew(question):
-            header = "לפי המידע שהצלחתי לקרוא כרגע:"
-            quota_note = "מכסת Gemini כרגע מוגבלת, אז עניתי מתוך המידע המקומי של הבוט בלבד."
-            image_note = "לא היה לי כרגע עיבוד תמונה חי, אז הסתמכתי רק על הטקסט והמידע הקיים."
-        else:
-            header = "Based on the data I could read right now:"
-            quota_note = "Gemini quota is limited right now, so I answered only from the bot's local data."
-            image_note = "Live image analysis was not available right now, so I relied only on text and existing bot data."
-
-        prefix_parts: list[str] = []
-        if quota_limited:
-            prefix_parts.append(quota_note)
-        if image_unprocessed:
-            prefix_parts.append(image_note)
-        prefix_parts.append(header)
-
-        body = "\n".join(f"- {self._truncate(line, 220)}" for line in lines[:8])
-        return "\n\n".join([" ".join(prefix_parts), body])
+        return lines
 
     def _relevant_lines(self, content: str, tokens: set[str]) -> list[str]:
         candidate_lines = [line.strip(" -•\t") for line in content.splitlines() if line.strip()]
@@ -719,6 +919,335 @@ class AIAssistantService:
             if cleaned and cleaned not in models:
                 models.append(cleaned)
         return models
+
+    def _load_command_guides(self) -> list[CommandGuide]:
+        if self._cached_command_guides is not None:
+            return self._cached_command_guides
+
+        guides: list[CommandGuide] = []
+        cogs_dir = Path(__file__).resolve().parents[1] / "cogs"
+        for file_path in sorted(cogs_dir.glob("*.py")):
+            if file_path.name == "__init__.py":
+                continue
+            try:
+                source = file_path.read_text(encoding="utf-8")
+                tree = ast.parse(source)
+            except (OSError, SyntaxError):
+                continue
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.AsyncFunctionDef):
+                    continue
+                guide = self._build_command_guide_from_node(node, file_path.name)
+                if guide is not None:
+                    guides.append(guide)
+
+        guides.sort(key=lambda guide: guide.name)
+        self._cached_command_guides = guides
+        return guides
+
+    def _build_command_guide_from_node(self, node: ast.AsyncFunctionDef, source_file: str) -> CommandGuide | None:
+        command_name: str | None = None
+        description = ""
+        admin_required = False
+        linked_required = False
+        allowed_contexts: list[str] = []
+        parameter_descriptions: dict[str, str] = {}
+
+        for decorator in node.decorator_list:
+            dotted_name = self._ast_dotted_name(decorator.func if isinstance(decorator, ast.Call) else decorator)
+            if dotted_name == "app_commands.command" and isinstance(decorator, ast.Call):
+                command_name = self._ast_keyword_string(decorator, "name") or node.name
+                description = self._ast_keyword_string(decorator, "description") or ""
+            elif dotted_name == "admin_only":
+                admin_required = True
+            elif dotted_name == "linked_roblox_required":
+                linked_required = True
+            elif dotted_name == "app_commands.allowed_contexts" and isinstance(decorator, ast.Call):
+                for keyword in decorator.keywords:
+                    if isinstance(keyword.value, ast.Constant) and keyword.value.value is True and keyword.arg:
+                        allowed_contexts.append(keyword.arg)
+            elif dotted_name == "app_commands.describe" and isinstance(decorator, ast.Call):
+                for keyword in decorator.keywords:
+                    if keyword.arg:
+                        description_text = self._ast_literal_string(keyword.value)
+                        if description_text:
+                            parameter_descriptions[keyword.arg] = description_text
+
+        if not command_name:
+            return None
+
+        return CommandGuide(
+            name=command_name,
+            description=description,
+            admin_only=admin_required,
+            linked_roblox_required=linked_required,
+            allowed_contexts=tuple(dict.fromkeys(allowed_contexts)),
+            parameter_descriptions=parameter_descriptions,
+            source_file=source_file,
+        )
+
+    def _match_command_guides(self, question: str) -> list[CommandGuide]:
+        normalized_question = _normalize_text(question)
+        if not normalized_question:
+            return []
+
+        tokens = set(TOKEN_PATTERN.findall(normalized_question))
+        explicit_commands = {match.casefold() for match in COMMAND_PATTERN.findall(question)}
+        guides = self._load_command_guides()
+        scored: list[tuple[float, CommandGuide]] = []
+
+        for guide in guides:
+            score = 0.0
+            if guide.name.casefold() in explicit_commands:
+                score += 12.0
+            if guide.name.casefold() in normalized_question:
+                score += 6.0
+
+            description_tokens = set(TOKEN_PATTERN.findall(_normalize_text(guide.description)))
+            score += len(tokens & description_tokens)
+
+            for keyword in self._command_intent_keywords(guide.name):
+                if keyword in normalized_question:
+                    score += 2.0
+
+            if score > 0:
+                scored.append((score, guide))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [guide for _, guide in scored[:4]]
+
+    def _build_scenario_answer(self, question: str, guides: Sequence[CommandGuide]) -> str | None:
+        normalized = _normalize_text(question)
+        tokens = set(TOKEN_PATTERN.findall(normalized))
+        if not tokens:
+            return None
+
+        is_hebrew = _contains_hebrew(question)
+        has_link_intent = bool(tokens & LINK_KEYWORDS)
+        has_buy_intent = bool(tokens & BUY_KEYWORDS)
+        has_receive_intent = bool(tokens & RECEIVE_KEYWORDS)
+        has_order_intent = bool(tokens & ORDER_KEYWORDS)
+        has_system_intent = bool(tokens & SYSTEM_KEYWORDS)
+
+        if has_link_intent and (has_buy_intent or has_receive_intent):
+            return self._build_flow_answer(
+                question,
+                ["link", "linkedaccount", "buywithpaypal", "buywithrobux", "getsystem"],
+                is_hebrew=is_hebrew,
+                title_he="לפי הזרימה שממומשת בבוט, זה הסדר הנכון:",
+                title_en="Based on the flow implemented in the bot, this is the right order:",
+            )
+
+        if has_buy_intent and has_receive_intent:
+            return self._build_flow_answer(
+                question,
+                ["buywithpaypal", "buywithrobux", "getsystem", "linkedaccount"],
+                is_hebrew=is_hebrew,
+                title_he="ככה קנייה ומסירה עובדות בבוט:",
+                title_en="This is how purchase and delivery work in the bot:",
+            )
+
+        if has_order_intent:
+            return self._build_flow_answer(
+                question,
+                ["sendorderpanel", "list"],
+                is_hebrew=is_hebrew,
+                title_he="ככה מערכת ההזמנות עובדת לפי הקוד של הבוט:",
+                title_en="This is how the order system works according to the bot code:",
+            )
+
+        if has_system_intent and any(keyword in normalized for keyword in {"edit", "add", "send", "remove", "admin", "לערוך", "להוסיף", "לשלוח", "אדמין"}):
+            return self._build_flow_answer(
+                question,
+                ["addsystem", "editsystem", "sendsystem", "systemslist"],
+                is_hebrew=is_hebrew,
+                title_he="ככה ניהול מערכות עובד בבוט:",
+                title_en="This is how system management works in the bot:",
+            )
+
+        if guides and self._is_how_to_question(tokens):
+            return self._build_command_guide_answer(question, guides, [])
+
+        return None
+
+    def _build_flow_answer(
+        self,
+        question: str,
+        command_order: Sequence[str],
+        *,
+        is_hebrew: bool,
+        title_he: str,
+        title_en: str,
+    ) -> str:
+        guide_map = {guide.name: guide for guide in self._load_command_guides()}
+        lines: list[str] = [title_he if is_hebrew else title_en]
+        step_number = 1
+        for command_name in command_order:
+            guide = guide_map.get(command_name)
+            line = self._format_command_guide(guide, is_hebrew=is_hebrew) if guide is not None else None
+            if not line:
+                continue
+            lines.append(f"{step_number}. {line}")
+            step_number += 1
+
+        if is_hebrew and not self.settings.roblox_oauth_enabled and "link" in command_order:
+            lines.append("שים לב: `/link` יעבוד רק אם Roblox OAuth הוגדר במשתני הסביבה של הבוט.")
+        elif not is_hebrew and not self.settings.roblox_oauth_enabled and "link" in command_order:
+            lines.append("Note: `/link` only works after the Roblox OAuth environment variables are configured for the bot.")
+
+        return "\n".join(lines)
+
+    def _build_command_guide_answer(
+        self,
+        question: str,
+        guides: Sequence[CommandGuide],
+        supporting_lines: Sequence[str],
+    ) -> str | None:
+        if not guides:
+            return None
+
+        is_hebrew = _contains_hebrew(question)
+        intro = (
+            "לפי הפקודות והקוד של הבוט, זה מה שצריך לדעת:"
+            if is_hebrew
+            else "According to the bot commands and code, this is what you need to know:"
+        )
+        lines = [intro]
+        for index, guide in enumerate(guides[:3], start=1):
+            formatted = self._format_command_guide(guide, is_hebrew=is_hebrew)
+            if formatted:
+                lines.append(f"{index}. {formatted}")
+
+        if supporting_lines:
+            extra_title = "עוד פרטים שמצאתי:" if is_hebrew else "Extra details I found:"
+            lines.append(extra_title)
+            for line in supporting_lines[:2]:
+                lines.append(f"- {self._truncate(line, 220)}")
+
+        return "\n".join(lines)
+
+    def _format_command_guide(self, guide: CommandGuide, *, is_hebrew: bool) -> str:
+        detail = COMMAND_DETAIL_OVERRIDES.get(guide.name, {}).get("he" if is_hebrew else "en") or guide.description
+        detail = detail.strip()
+        access_parts: list[str] = []
+        if guide.admin_only:
+            access_parts.append("לאדמינים בלבד" if is_hebrew else "admin-only")
+        if guide.linked_roblox_required:
+            access_parts.append("דורש חשבון Roblox מקושר קודם" if is_hebrew else "requires a linked Roblox account first")
+        context_text = self._format_allowed_contexts(guide.allowed_contexts, is_hebrew=is_hebrew)
+        if context_text:
+            access_parts.append(context_text)
+
+        parameter_text = self._format_parameter_hint(guide, is_hebrew=is_hebrew)
+        suffix_parts = access_parts[:]
+        if parameter_text:
+            suffix_parts.append(parameter_text)
+
+        if suffix_parts:
+            return f"`/{guide.name}` - {detail} ({'; '.join(suffix_parts)})."
+        return f"`/{guide.name}` - {detail}."
+
+    def _format_allowed_contexts(self, contexts: Sequence[str], *, is_hebrew: bool) -> str | None:
+        if not contexts:
+            return None
+        values = set(contexts)
+        if values >= {"guilds", "dms", "private_channels"}:
+            return "עובד גם בשרת וגם ב-DM" if is_hebrew else "works in both servers and DMs"
+        if "guilds" in values and not {"dms", "private_channels"} & values:
+            return "מיועד לשרתים" if is_hebrew else "meant for servers"
+        if {"dms", "private_channels"} & values and "guilds" not in values:
+            return "מיועד ל-DM" if is_hebrew else "meant for DMs"
+        return None
+
+    def _format_parameter_hint(self, guide: CommandGuide, *, is_hebrew: bool) -> str | None:
+        if not guide.parameter_descriptions:
+            return None
+        important_parameters = list(guide.parameter_descriptions.items())[:2]
+        labels = []
+        for name, description in important_parameters:
+            labels.append(f"{name}: {self._truncate(description, 70)}")
+        if not labels:
+            return None
+        if is_hebrew:
+            return "פרמטרים חשובים: " + ", ".join(labels)
+        return "important parameters: " + ", ".join(labels)
+
+    def _build_local_prefix(self, question: str, *, quota_limited: bool, image_unprocessed: bool) -> str:
+        if _contains_hebrew(question):
+            header = "עניתי מתוך הנתונים המקומיים, הפקודות והקוד של הבוט."
+            quota_note = "מכסת Gemini כרגע מוגבלת, אז לא השתמשתי בתשובה חיצונית."
+            image_note = "עיבוד תמונה חי לא היה זמין כרגע, אז נשענתי רק על הטקסט והקוד המקומי."
+        else:
+            header = "I answered from the bot's local data, commands, and source code."
+            quota_note = "Gemini quota is limited right now, so I did not rely on an external AI response."
+            image_note = "Live image processing was not available right now, so I relied only on local text and source code."
+
+        parts = []
+        if quota_limited:
+            parts.append(quota_note)
+        if image_unprocessed:
+            parts.append(image_note)
+        parts.append(header)
+        return " ".join(parts)
+
+    @staticmethod
+    def _is_how_to_question(tokens: set[str]) -> bool:
+        return bool(tokens & HOW_TO_KEYWORDS)
+
+    @staticmethod
+    def _command_intent_keywords(command_name: str) -> set[str]:
+        mapping: dict[str, set[str]] = {
+            "link": LINK_KEYWORDS,
+            "linkedaccount": LINK_KEYWORDS,
+            "checkroblox": LINK_KEYWORDS | {"check", "profile", "ownership", "owned", "בדיקה"},
+            "systemslist": SYSTEM_KEYWORDS | {"list", "show", "רשימה"},
+            "addsystem": SYSTEM_KEYWORDS | {"add", "upload", "create", "להוסיף"},
+            "editsystem": SYSTEM_KEYWORDS | {"edit", "update", "לערוך", "לעדכן"},
+            "sendsystem": SYSTEM_KEYWORDS | RECEIVE_KEYWORDS | {"send", "grant", "לשלוח"},
+            "buywithpaypal": BUY_KEYWORDS | {"paypal", "webhook"},
+            "buywithrobux": BUY_KEYWORDS | {"robux", "gamepass"},
+            "getsystem": RECEIVE_KEYWORDS | BUY_KEYWORDS | SYSTEM_KEYWORDS,
+            "sendorderpanel": ORDER_KEYWORDS,
+            "list": ORDER_KEYWORDS | {"active", "manage", "list", "פעילות"},
+            "vouch": {"vouch", "review", "הוכחה", "דירוג"},
+            "vouches": {"vouch", "stats", "reviews", "הוכחות", "דירוג"},
+            "poll": {"poll", "vote", "סקר"},
+            "editpoll": {"poll", "edit", "סקר", "לערוך"},
+            "giveaway": {"giveaway", "winner", "prize", "גיבאווי"},
+            "editgiveaway": {"giveaway", "edit", "גיבאווי", "לערוך"},
+            "trainbot": {"train", "knowledge", "ai", "אימון", "ללמד"},
+            "endtraining": {"train", "resume", "ai", "אימון"},
+        }
+        return mapping.get(command_name, {command_name.casefold()})
+
+    @staticmethod
+    def _ast_dotted_name(node: ast.AST) -> str:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            parent = AIAssistantService._ast_dotted_name(node.value)
+            return f"{parent}.{node.attr}" if parent else node.attr
+        return ""
+
+    @staticmethod
+    def _ast_literal_string(node: ast.AST | None) -> str | None:
+        if node is None:
+            return None
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        try:
+            value = ast.literal_eval(node)
+        except (ValueError, SyntaxError):
+            return None
+        return value if isinstance(value, str) else None
+
+    @staticmethod
+    def _ast_keyword_string(call: ast.Call, key: str) -> str | None:
+        for keyword in call.keywords:
+            if keyword.arg == key:
+                return AIAssistantService._ast_literal_string(keyword.value)
+        return None
 
     def _build_live_ai_unavailable_answer(
         self,

@@ -115,7 +115,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Admin-only web panels can create and edit reaction-based polls with custom emoji options, channel selection, stored IDs, and automatic close/result updates.
 - Admin-only web panels can create and edit giveaways with durations, winner counts, requirement text, stored IDs, and automatic winner selection when the timer expires.
 - Systems can be edited through an admin dropdown plus web editor, including metadata, file replacement, image replacement, PayPal link, and Roblox gamepass updates.
-- The AI assistant answers in the configured support channel, can use a separate configured training channel for `/trainbot`, prioritizes admin-trained local knowledge entries over built-in docs, can read screenshots, public links, and text files, can silently learn useful support-channel context outside `/trainbot`, and if no training channel is configured it falls back to the support channel.
+- The AI assistant answers in the configured support channel, can use a separate configured training channel for `/trainbot`, prioritizes admin-trained local knowledge entries over built-in docs, reads slash-command definitions plus workflow knowledge derived from the bot code and services, can read screenshots, public links, and text files, can silently learn useful support-channel context outside `/trainbot`, and if no training channel is configured it falls back to the support channel.
 
 ## Database Schema
 

@@ -112,6 +112,10 @@ def _chunk_lines(lines: Sequence[str], *, max_size: int = 1000) -> list[str]:
     return chunks or ["אין נתונים זמינים."]
 
 
+def _format_meta_line(parts: Sequence[tuple[str, Any]]) -> str:
+    return " | ".join(f"**{label}:** {value}" for label, value in parts)
+
+
 async def _resolve_text_channel(bot: "SalesBot", channel_id: int) -> discord.TextChannel:
     channel = bot.get_channel(channel_id)
     if channel is None:
@@ -288,13 +292,23 @@ class PollService:
 
     def build_embed(self, poll: PollRecord) -> discord.Embed:
         ends_at = _parse_datetime(poll.ends_at)
+        description = "\n".join(
+            [
+                _format_meta_line(
+                    [
+                        ("מזהה", poll.id),
+                        ("סטטוס", _display_status(poll.status)),
+                    ]
+                ),
+                "",
+                poll.question,
+            ]
+        )
         embed = discord.Embed(
             title=f"סקר מספר #{poll.id}",
-            description=poll.question,
+            description=description,
             color=discord.Color.blurple() if _is_active_status(poll.status) else discord.Color.dark_grey(),
         )
-        embed.add_field(name="סטטוס", value=_display_status(poll.status), inline=True)
-        embed.add_field(name="מזהה", value=str(poll.id), inline=True)
         embed.add_field(name="מסתיים ב", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
 
         option_lines = [f"{option.emoji} {option.label}" for option in poll.options]
@@ -627,14 +641,24 @@ class GiveawayService:
 
     def build_embed(self, giveaway: GiveawayRecord) -> discord.Embed:
         ends_at = _parse_datetime(giveaway.ends_at)
+        description = "\n".join(
+            [
+                _format_meta_line(
+                    [
+                        ("כמות זוכים", giveaway.winner_count),
+                        ("מזהה", giveaway.id),
+                        ("סטטוס", _display_status(giveaway.status)),
+                    ]
+                ),
+                "",
+                giveaway.description or "לחצו על הריאקשן 🎉 כדי להצטרף להגרלה.",
+            ]
+        )
         embed = discord.Embed(
             title=f"🎉 הגרלה מספר #{giveaway.id}: {giveaway.title}",
-            description=giveaway.description or "לחצו על הריאקשן 🎉 כדי להצטרף להגרלה.",
+            description=description,
             color=discord.Color.green() if _is_active_status(giveaway.status) else discord.Color.dark_grey(),
         )
-        embed.add_field(name="סטטוס", value=_display_status(giveaway.status), inline=True)
-        embed.add_field(name="מזהה", value=str(giveaway.id), inline=True)
-        embed.add_field(name="כמות זוכים", value=str(giveaway.winner_count), inline=True)
         embed.add_field(name="מסתיים ב", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
         embed.add_field(name="כיצד להצטרף", value=f"לחצו על הריאקשן {GIVEAWAY_ENTRY_EMOJI}", inline=False)
         embed.add_field(name="דרישות", value=giveaway.requirements or "אין דרישות נוספות.", inline=False)

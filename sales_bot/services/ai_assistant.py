@@ -68,6 +68,7 @@ GEMINI_PRIMARY_MODEL = "gemini-2.5-flash"
 GEMINI_FALLBACK_MODELS = ("gemini-2.5-flash",)
 AUTO_LEARN_MIN_TEXT_CHARS = 160
 AUTO_LEARN_MAX_TEXT_CHARS = 3_200
+ADMIN_AUTO_LEARN_MIN_TEXT_CHARS = 80
 
 PASSIVE_LEARNING_KEYWORDS = {
     "important",
@@ -93,8 +94,13 @@ PASSIVE_LEARNING_KEYWORDS = {
 DOMAIN_KNOWLEDGE_KEYWORDS = {
     "roblox",
     "discord",
+    "account",
+    "accounts",
+    "connect",
     "dm",
     "paypal",
+    "purchase",
+    "buyer",
     "robux",
     "gamepass",
     "system",
@@ -114,8 +120,14 @@ DOMAIN_KNOWLEDGE_KEYWORDS = {
     "ownership",
     "transfer",
     "payment",
+    "delivery",
+    "deliver",
+    "webhook",
     "link",
     "oauth",
+    "חשבון",
+    "חשבונות",
+    "אימות",
     "רובלוקס",
     "דיסקורד",
     "הודעה",
@@ -173,6 +185,13 @@ LINK_KEYWORDS = {
     "roblox",
     "link",
     "linked",
+    "connect",
+    "connected",
+    "account",
+    "accounts",
+    "verify",
+    "verified",
+    "verification",
     "oauth",
     "קישור",
     "לקשר",
@@ -180,6 +199,10 @@ LINK_KEYWORDS = {
     "מחבר",
     "חיבור",
     "להתחבר",
+    "חשבון",
+    "חשבונות",
+    "אימות",
+    "מאומת",
     "רובלוקס",
     "מקושר",
     "שם",
@@ -216,6 +239,18 @@ RECEIVE_KEYWORDS = {
 }
 ORDER_KEYWORDS = {"order", "orders", "custom", "panel", "הזמנה", "הזמנות", "אישית"}
 SYSTEM_KEYWORDS = {"system", "systems", "מערכת", "מערכות", "file", "קובץ"}
+FLOW_AFTER_KEYWORDS = {
+    "after",
+    "then",
+    "next",
+    "once",
+    "following",
+    "אחרי",
+    "אחר",
+    "אחר כך",
+    "ואז",
+    "לאחר",
+}
 
 COMMAND_DETAIL_OVERRIDES: dict[str, dict[str, str]] = {
     "link": {
@@ -756,6 +791,7 @@ class AIAssistantService:
     async def _build_builtin_knowledge(self) -> list[AIKnowledgeRecord]:
         records: list[AIKnowledgeRecord] = []
         records.extend(self._build_feature_knowledge())
+        records.extend(self._build_workflow_knowledge())
         records.extend(self._build_command_catalog_knowledge())
         records.extend(await self._build_system_catalog_knowledge())
         records.extend(self._load_readme_knowledge())
@@ -814,7 +850,8 @@ class AIAssistantService:
             "- Ownership tools / כלי בעלות: admins can give, revoke, transfer, and inspect system ownership.\n"
             "- Vouches / הוכחות: the bot supports vouch creation and publishing to the configured vouch channel.\n"
             "- AI training / אימון AI: admins can start training mode with /trainbot and stop it with /endtraining, using the configured AI training channel for new knowledge.\n"
-            "- Rich AI inputs / קלט AI עשיר: the assistant can read screenshots, image attachments, public links, and text files."
+            "- Rich AI inputs / קלט AI עשיר: the assistant can read screenshots, image attachments, public links, and text files.\n"
+            "- Local code knowledge / ידע מקומי מהקוד: the assistant reads slash-command definitions, workflow knowledge derived from the bot services, the live system catalog, README sections, and stored AI knowledge entries."
         )
 
         config_summary = (
@@ -845,6 +882,86 @@ class AIAssistantService:
                 created_at="builtin",
             ),
         ]
+
+    def _build_workflow_knowledge(self) -> list[AIKnowledgeRecord]:
+        workflow_blocks = [
+            (
+                "Roblox account linking code flow / זרימת קישור חשבון Roblox:\n"
+                "- Start / התחלה: users run /link and Roblox OAuth must already be configured in the bot settings.\n"
+                "- Authorization / הרשאה: the bot creates a temporary OAuth state that stays valid for 60 minutes and sends a Roblox authorization button.\n"
+                "- Callback / חזרה: after approval, the web callback exchanges the code, fetches the Roblox profile, and stores the linked Roblox account.\n"
+                "- Sync / סנכרון: in the primary guild the bot tries to update the member nickname and assign the configured Roblox verified role.\n"
+                "- Lookup / בדיקה: /linkedaccount shows the saved linked Roblox account details later.\n"
+                "- Failure cases / כשלים: if the OAuth state is invalid or expired, the user must run /link again."
+            ),
+            (
+                "PayPal purchase and delivery code flow / זרימת רכישת PayPal ומסירה:\n"
+                "- Access / גישה: /buywithpaypal requires a linked Roblox account and blacklisted users are blocked from buying.\n"
+                "- Selection / בחירה: the command only lists systems that have a configured PayPal link and are not already owned by the buyer.\n"
+                "- Pending purchase / רכישה ממתינה: the bot creates a pending purchase record and sends a PayPal button to the buyer.\n"
+                "- Confirmation / אישור: delivery only happens after the PayPal webhook flow marks the purchase as COMPLETED.\n"
+                "- Delivery / מסירה: once payment is confirmed, the bot delivers the system by DM and records ownership automatically.\n"
+                "- Failure cases / כשלים: if the user has closed DMs or the stored file is missing on the server, staff help is needed to finish delivery."
+            ),
+            (
+                "Robux gamepass claim code flow / זרימת קבלת מערכת דרך גיימפאס:\n"
+                "- Start / התחלה: /getsystem lists the stored systems that the user can check.\n"
+                "- Redownload / הורדה מחדש: if the user already owns the system, the bot re-sends it by DM without checking a gamepass again.\n"
+                "- Requirement / דרישה: for a new claim, the system must have a Roblox gamepass configured and the user must link Roblox first.\n"
+                "- Gamepass validation / אימות גיימפאס: the bot checks whether the linked Roblox account owns the matching gamepass.\n"
+                "- Delivery / מסירה: if the gamepass check passes, the system is sent by DM and ownership is recorded.\n"
+                "- Restriction / הגבלה: transfer-locked systems cannot be reclaimed again through /getsystem."
+            ),
+            (
+                "System delivery and ownership code flow / זרימת מסירה ובעלות של מערכות:\n"
+                "- Delivery channel / ערוץ מסירה: systems are delivered through Discord DM, not in the public support channel.\n"
+                "- File send / שליחת קובץ: the bot sends the stored system file in DM to the target user.\n"
+                "- Ownership record / רישום בעלות: after delivery the bot records ownership and stores the delivery message reference.\n"
+                "- Blacklist rule / כלל בלקליסט: blacklisted users cannot purchase or receive systems.\n"
+                "- Missing file / קובץ חסר: if the file is missing after deploy, the bot reports that it is not on the server and may need persistent storage or re-upload.\n"
+                "- Closed DMs / DM סגור: if DM sending fails, the user needs to open DMs before the delivery can succeed."
+            ),
+            (
+                "Custom order code flow / זרימת הזמנות אישיות:\n"
+                "- Panel / פאנל: admins send the custom order panel with /sendorderpanel to the configured order channel.\n"
+                "- Prerequisite / דרישה: users must link Roblox before they can submit a custom order form.\n"
+                "- Draft / טיוטה: the user fills a modal with the requested item, timeframe, payment method, and offered price, then reviews a preview.\n"
+                "- Owner review / בדיקת בעלים: when the user submits, the bot stores the order and sends it to the owner in DM with accept and reject buttons.\n"
+                "- Admin tools / כלי אדמין: /orders list sends active order details to the admin's DM for follow-up.\n"
+                "- Resolution / סיום: accepted orders stay active until completed, while rejected orders are closed."
+            ),
+            (
+                "System catalog and purchase availability from code / קטלוג מערכות וזמינות רכישה לפי הקוד:\n"
+                "- Storage / אחסון: each system stores a deliverable file, optional preview image, optional PayPal link, and optional Roblox gamepass ID.\n"
+                "- Listing / רשימה: /systemslist shows all stored systems in the bot.\n"
+                "- PayPal filter / סינון PayPal: /buywithpaypal only lists systems that have a PayPal link configured.\n"
+                "- Robux filter / סינון Robux: /buywithrobux only lists systems that have a Roblox gamepass configured.\n"
+                "- Gamepass parsing / פענוח גיימפאס: the bot accepts a Roblox gamepass link or ID and normalizes it into a stored gamepass ID.\n"
+                "- Direct admin delivery / מסירה ידנית: admins can still send a system directly with /sendsystem or /givesystem."
+            ),
+            (
+                "AI local learning sources / מקורות הלמידה המקומיים של ה-AI:\n"
+                "- Command code / קוד פקודות: the assistant reads slash-command names, descriptions, parameter hints, and access rules from the bot cogs.\n"
+                "- Service workflow knowledge / ידע זרימות מהשירותים: the assistant uses built-in knowledge derived from linking, payment, order, delivery, and ownership code paths.\n"
+                "- Live bot data / נתוני בוט חיים: the assistant reads the current system catalog from the database.\n"
+                "- Stored training / אימון שמור: admin training entries are stored in the AI knowledge table and ranked above builtin docs.\n"
+                "- Passive learning / למידה פסיבית: domain-relevant support notes can still be saved automatically when they look like reusable reference knowledge."
+            ),
+        ]
+
+        records: list[AIKnowledgeRecord] = []
+        for index, content in enumerate(workflow_blocks, start=1):
+            records.append(
+                AIKnowledgeRecord(
+                    id=-(4000 + index),
+                    content=content,
+                    created_by=None,
+                    source_channel_id=None,
+                    source_message_id=None,
+                    created_at="builtin",
+                )
+            )
+        return records
 
     async def _build_system_catalog_knowledge(self) -> list[AIKnowledgeRecord]:
         rows = await self.database.fetchall(
@@ -1495,6 +1612,27 @@ class AIAssistantService:
         has_receive_intent = bool(tokens & RECEIVE_KEYWORDS)
         has_order_intent = bool(tokens & ORDER_KEYWORDS)
         has_system_intent = bool(tokens & SYSTEM_KEYWORDS)
+        has_after_intent = any(keyword in normalized for keyword in FLOW_AFTER_KEYWORDS)
+        has_paypal_intent = any(keyword in normalized for keyword in {"paypal", "פייפאל", "webhook"})
+        has_robux_intent = any(keyword in normalized for keyword in {"robux", "רובקס", "gamepass", "גיימפאס"})
+
+        if has_paypal_intent and has_buy_intent:
+            return self._build_flow_answer(
+                ["link", "linkedaccount", "buywithpaypal"],
+                supporting_lines,
+                is_hebrew=is_hebrew,
+                title_he="ככה רכישת PayPal עובדת לפי הקוד של הבוט:",
+                title_en="This is how the PayPal purchase flow works according to the bot code:",
+            )
+
+        if has_robux_intent and (has_buy_intent or has_receive_intent or has_system_intent or has_after_intent):
+            return self._build_flow_answer(
+                ["link", "linkedaccount", "buywithrobux", "getsystem"],
+                supporting_lines,
+                is_hebrew=is_hebrew,
+                title_he="ככה רכישת Robux וקבלת המערכת עובדות בבוט:",
+                title_en="This is how the Robux purchase and system-claim flow work in the bot:",
+            )
 
         if has_link_intent and (has_buy_intent or has_receive_intent):
             return self._build_flow_answer(
@@ -1514,7 +1652,7 @@ class AIAssistantService:
                 title_en="This is how Roblox account linking works in the bot:",
             )
 
-        if has_buy_intent and has_receive_intent:
+        if has_buy_intent and (has_receive_intent or has_system_intent or has_after_intent):
             return self._build_flow_answer(
                 ["buywithpaypal", "buywithrobux", "getsystem", "linkedaccount"],
                 supporting_lines,
@@ -1855,6 +1993,8 @@ class AIAssistantService:
             return False
         if not self._looks_like_reference_note(content):
             return False
+        if author_is_admin and len(content) >= ADMIN_AUTO_LEARN_MIN_TEXT_CHARS:
+            return True
         if len(content) >= AUTO_LEARN_MIN_TEXT_CHARS:
             return author_is_admin or any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS)
         return any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS)
@@ -1862,7 +2002,11 @@ class AIAssistantService:
     def _should_store_passive_text(self, combined_context: str, content: str, *, author_is_admin: bool) -> bool:
         normalized = _normalize_text(combined_context)
         if author_is_admin:
-            return self._is_domain_relevant(combined_context)
+            return (
+                self._is_domain_relevant(combined_context)
+                and self._looks_like_reference_note(combined_context)
+                and len(content) >= ADMIN_AUTO_LEARN_MIN_TEXT_CHARS
+            )
         if not self._is_domain_relevant(combined_context):
             return False
         if content.count("?") > 0:

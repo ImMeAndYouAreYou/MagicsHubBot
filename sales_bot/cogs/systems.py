@@ -6,7 +6,7 @@ from discord.ext import commands
 
 from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only, linked_roblox_required
-from sales_bot.ui.common import ConfirmView, PaginatedSelectView
+from sales_bot.ui.common import ConfirmView, PaginatedSelectView, edit_interaction_response
 
 
 async def system_autocomplete(
@@ -108,14 +108,16 @@ class SystemsCog(commands.Cog):
 
             async def on_confirm(confirm_interaction: discord.Interaction, view: ConfirmView) -> None:
                 deleted = await self.bot.services.systems.delete_system(selected_system.id)
-                await confirm_interaction.response.edit_message(
+                await edit_interaction_response(
+                    confirm_interaction,
                     content=f"Deleted system **{deleted.name}**.",
                     embed=None,
                     view=view,
                 )
 
             confirm_view = ConfirmView(actor_id=interaction.user.id, on_confirm=on_confirm)
-            await select_interaction.response.edit_message(
+            await edit_interaction_response(
+                select_interaction,
                 content="Confirm deletion for the selected system.",
                 embed=embed,
                 view=confirm_view,
@@ -168,7 +170,7 @@ class SystemsCog(commands.Cog):
 
             view = discord.ui.View()
             view.add_item(discord.ui.Button(label="Open System Edit Panel", style=discord.ButtonStyle.link, url=panel_url))
-            await select_interaction.response.edit_message(content=None, embed=embed, view=view)
+            await edit_interaction_response(select_interaction, content=None, embed=embed, view=view)
 
         view = PaginatedSelectView(
             actor_id=interaction.user.id,

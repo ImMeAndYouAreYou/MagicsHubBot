@@ -46,6 +46,7 @@ class DeliveryService:
 
         if record_ownership:
             await bot.services.ownership.grant_system(user.id, system.id, granted_by, source)
+            await bot.services.ownership.refresh_claim_role_membership(bot, user.id, sync_ownerships=False)
 
         await bot.services.ownership.add_delivery_message(
             user_id=user.id,

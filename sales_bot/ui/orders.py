@@ -8,6 +8,7 @@ import discord
 from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.models import OrderRequestRecord
 from sales_bot.ui.common import RestrictedView
+from sales_bot.ui.common import defer_interaction_response, edit_interaction_response
 
 
 @dataclass(slots=True)
@@ -172,6 +173,8 @@ class OrderPreviewView(RestrictedView):
         interaction: discord.Interaction,
         button: discord.ui.Button[Any],
     ) -> None:
+        await defer_interaction_response(interaction)
+
         order = await self.bot.services.orders.create_request(
             user_id=interaction.user.id,
             requested_item=self.draft.requested_item,
@@ -194,7 +197,8 @@ class OrderPreviewView(RestrictedView):
         await self.bot.services.orders.set_owner_message(order.id, owner_message.id)
         self.bot.add_view(decision_view, message_id=owner_message.id)
         self.disable_all_items()
-        await interaction.response.edit_message(
+        await edit_interaction_response(
+            interaction,
             content="ההזמנה נשלחה בהצלחה לבעלים.",
             embed=build_order_embed("ההזמנה שלך נשלחה", self.draft, user=interaction.user),
             view=self,
@@ -237,6 +241,8 @@ class OrderDecisionView(RestrictedView):
         self.add_item(OrderDecisionButton("reject", order_id))
 
     async def handle_action(self, interaction: discord.Interaction, action: str) -> None:
+        await defer_interaction_response(interaction)
+
         order = await self.bot.services.orders.resolve_request(
             self.order_id,
             reviewer_id=interaction.user.id,
@@ -271,7 +277,7 @@ class OrderDecisionView(RestrictedView):
         embed.color = discord.Color.green() if action == "accept" else discord.Color.red()
         embed.add_field(name="סטטוס", value="התקבל" if action == "accept" else "נדחה", inline=False)
         self.disable_all_items()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await edit_interaction_response(interaction, embed=embed, view=self)
         self.stop()
 
 
@@ -309,7 +315,7 @@ class OrderManagementView(RestrictedView):
 
         self.disable_all_items()
         if interaction is not None:
-            await interaction.response.edit_message(embed=embed, view=self)
+            await edit_interaction_response(interaction, embed=embed, view=self)
         else:
             await self.message.edit(embed=embed, view=self)
 
@@ -319,6 +325,8 @@ class OrderManagementView(RestrictedView):
         interaction: discord.Interaction,
         button: discord.ui.Button[Any],
     ) -> None:
+        await defer_interaction_response(interaction)
+
         self.order = await self.bot.services.orders.resolve_request(
             self.order.id,
             reviewer_id=interaction.user.id,
@@ -426,6 +434,8 @@ class OrderRejectPreviewView(RestrictedView):
         interaction: discord.Interaction,
         button: discord.ui.Button[Any],
     ) -> None:
+        await defer_interaction_response(interaction)
+
         updated_order = await self.bot.services.orders.resolve_request(
             self.order.id,
             reviewer_id=interaction.user.id,
@@ -450,7 +460,8 @@ class OrderRejectPreviewView(RestrictedView):
             status="rejected",
             rejection_reason=self.reason,
         )
-        await interaction.response.edit_message(
+        await edit_interaction_response(
+            interaction,
             content="הדחייה נשלחה למשתמש בהצלחה.",
             embed=requester_embed,
             view=None,

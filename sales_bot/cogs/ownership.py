@@ -8,9 +8,9 @@ from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
 from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.models import SystemRecord
-from sales_bot.ui.common import ConfirmView
-from sales_bot.ui.common import PaginatedSelectView
-from sales_bot.ui.ownership import CLAIMABLE_ROLE_ID, ClaimRolePanelView, build_system_names
+from sales_bot.services.ownership import CLAIMABLE_ROLE_ID
+from sales_bot.ui.common import ConfirmView, PaginatedSelectView, edit_interaction_response
+from sales_bot.ui.ownership import ClaimRolePanelView, build_system_names
 
 
 async def system_autocomplete(
@@ -46,6 +46,20 @@ class OwnershipCog(commands.Cog):
     @app_commands.describe(user="המשתמש שעבורו תוצג רשימת המערכות.")
     @admin_only()
     async def checksystems(self, interaction: discord.Interaction, user: discord.User) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                if exc.code != 40060:
+                    raise
+
+        await self.bot.services.ownership.sync_linked_gamepass_ownerships(self.bot, user.id)
+        await self.bot.services.ownership.refresh_claim_role_membership(
+            self.bot,
+            user.id,
+            guild=interaction.guild,
+            sync_ownerships=False,
+        )
         systems = await self.bot.services.ownership.list_user_systems(user.id)
         embed = build_systems_embed(
             f"המערכות של {user}",
@@ -53,13 +67,20 @@ class OwnershipCog(commands.Cog):
             color=discord.Color.blue(),
             empty_text="למשתמש הזה אין כרגע מערכות בבעלות.",
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="getsystem", description="קבלת מערכת אם היא כבר בבעלותך או אם החשבון המקושר שלך מחזיק בגיימפאס המתאים.")
     async def getsystem(self, interaction: discord.Interaction) -> None:
-        systems = await self.bot.services.systems.list_systems()
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                if exc.code != 40060:
+                    raise
+
+        systems = await self.bot.services.ownership.list_getsystem_available_systems(self.bot, interaction.user.id)
         if not systems:
-            await interaction.response.send_message("כרגע אין מערכות זמינות בבוט.", ephemeral=True)
+            await interaction.followup.send("כרגע אין מערכות זמינות בבוט.", ephemeral=True)
             return
 
         async def on_selected(
@@ -68,6 +89,13 @@ class OwnershipCog(commands.Cog):
             parent_view: PaginatedSelectView,
         ) -> None:
             selected_system = system
+
+            synced_systems = await self.bot.services.ownership.sync_linked_gamepass_ownerships(
+                self.bot,
+                interaction.user.id,
+                system_ids={selected_system.id},
+            )
+            synced_now = any(synced_system.id == selected_system.id for synced_system in synced_systems)
 
             already_owned = await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id)
             is_transfer_locked = await self.bot.services.ownership.is_transfer_locked(interaction.user.id, selected_system.id)
@@ -81,8 +109,20 @@ class OwnershipCog(commands.Cog):
                     granted_by=None,
                     record_ownership=False,
                 )
-                await select_interaction.response.edit_message(
-                    content=f"המערכת **{selected_system.name}** נשלחה אליך שוב ב-DM כי היא כבר רשומה בבעלותך.",
+                await self.bot.services.ownership.refresh_claim_role_membership(
+                    self.bot,
+                    interaction.user.id,
+                    guild=select_interaction.guild,
+                    sync_ownerships=False,
+                )
+                success_message = (
+                    f"המערכת **{selected_system.name}** נשלחה אליך ב-DM כי הגיימפאס אומת ונשמר בבעלות שלך."
+                    if synced_now
+                    else f"המערכת **{selected_system.name}** נשלחה אליך שוב ב-DM כי היא כבר רשומה בבעלותך."
+                )
+                await edit_interaction_response(
+                    select_interaction,
+                    content=success_message,
                     embed=None,
                     view=None,
                 )
@@ -117,10 +157,11 @@ class OwnershipCog(commands.Cog):
                 self.bot,
                 interaction.user,
                 selected_system,
-                source="roblox-gamepass-claim",
+                source=self.bot.services.ownership.ROBLOX_CLAIM_SOURCE,
                 granted_by=None,
             )
-            await select_interaction.response.edit_message(
+            await edit_interaction_response(
+                select_interaction,
                 content=f"המערכת **{selected_system.name}** נשלחה אליך ב-DM כי הגיימפאס אומת בהצלחה.",
                 embed=None,
                 view=None,
@@ -138,7 +179,7 @@ class OwnershipCog(commands.Cog):
             value_getter=lambda system: str(system.id),
             on_selected=on_selected,
         )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "בחר את המערכת שתרצה לבדוק מולה את הגיימפאס של החשבון המקושר שלך.",
             view=view,
             ephemeral=True,
@@ -167,7 +208,8 @@ class OwnershipCog(commands.Cog):
                 source="grant",
                 granted_by=interaction.user.id,
             )
-            await confirm_interaction.response.edit_message(
+            await edit_interaction_response(
+                confirm_interaction,
                 content=f"המערכת **{selected_system.name}** נשלחה אל {user.mention} ונרשמה בבעלות שלו.",
                 embed=embed,
                 view=view,
@@ -205,7 +247,14 @@ class OwnershipCog(commands.Cog):
                 user_id=user.id,
                 system_id=selected_system.id,
             )
-            await confirm_interaction.response.edit_message(
+            await self.bot.services.ownership.refresh_claim_role_membership(
+                self.bot,
+                user.id,
+                guild=confirm_interaction.guild,
+                sync_ownerships=False,
+            )
+            await edit_interaction_response(
+                confirm_interaction,
                 content=(
                     f"המערכת **{selected_system.name}** הוסרה מהבעלות של {user.mention}. "
                     f"נמחקו {deleted_messages} הודעות מסירה ישנות ב-DM."
@@ -268,8 +317,7 @@ class OwnershipCog(commands.Cog):
             color=discord.Color.gold(),
             empty_text="לא נמצאו מערכות להעברה.",
         )
-        embed.add_field(name="מאת", value=from_user.mention, inline=True)
-        embed.add_field(name="אל", value=to_user.mention, inline=True)
+        embed.add_field(name="העברה", value=f"{from_user.mention} -> {to_user.mention}", inline=False)
         embed.add_field(
             name="הערה",
             value="ההעברה תסיר את המערכות מהמשתמש הישן, תנעל אותן עבורו לקבלה מחדש, ותמנע שכפול אצל המשתמש החדש.",
@@ -290,6 +338,19 @@ class OwnershipCog(commands.Cog):
                     user_id=from_user.id,
                     system_id=transferred_system.id,
                 )
+
+            await self.bot.services.ownership.refresh_claim_role_membership(
+                self.bot,
+                from_user.id,
+                guild=confirm_interaction.guild,
+                sync_ownerships=False,
+            )
+            await self.bot.services.ownership.refresh_claim_role_membership(
+                self.bot,
+                to_user.id,
+                guild=confirm_interaction.guild,
+                sync_ownerships=False,
+            )
 
             sender_embed = discord.Embed(title="המערכות שלך הועברו", color=discord.Color.orange())
             sender_embed.description = build_system_names(transferred_systems)
@@ -316,15 +377,15 @@ class OwnershipCog(commands.Cog):
                 color=discord.Color.green(),
                 empty_text="לא הועברו מערכות.",
             )
-            summary_embed.add_field(name="מאת", value=from_user.mention, inline=True)
-            summary_embed.add_field(name="אל", value=to_user.mention, inline=True)
+            summary_embed.add_field(name="העברה", value=f"{from_user.mention} -> {to_user.mention}", inline=False)
             summary_embed.add_field(name="הודעות DM שנמחקו", value=str(deleted_messages), inline=False)
 
             content = "ההעברה הושלמה בהצלחה. המשתמש הישן לא יוכל לקבל שוב את המערכות שהועברו דרך `/getsystem`."
             if dm_failures:
                 content += f" לא הצלחתי לשלוח הודעת DM אל: {', '.join(dm_failures)}."
 
-            await confirm_interaction.response.edit_message(
+            await edit_interaction_response(
+                confirm_interaction,
                 content=content,
                 embed=summary_embed,
                 view=view,

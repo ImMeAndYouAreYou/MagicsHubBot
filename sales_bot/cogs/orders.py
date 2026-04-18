@@ -9,7 +9,7 @@ from discord.ext import commands
 from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
 from sales_bot.exceptions import ExternalServiceError
-from sales_bot.ui.common import PaginatedSelectView
+from sales_bot.ui.common import PaginatedSelectView, edit_interaction_response
 from sales_bot.ui.orders import OrderManagementView, OrderPanelView, build_order_record_embed
 
 
@@ -120,7 +120,8 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
                 raise ExternalServiceError("לא הצלחתי לשלוח את פרטי ההזמנה ל-DM שלך.") from exc
 
             view.message = dm_message
-            await select_interaction.response.edit_message(
+            await edit_interaction_response(
+                select_interaction,
                 content="ההזמנה נשלחה אליך ב-DM. אפשר לבחור הזמנה נוספת אם צריך.",
                 view=parent_view,
             )

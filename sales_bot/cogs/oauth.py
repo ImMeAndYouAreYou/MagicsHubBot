@@ -78,15 +78,30 @@ class OAuthCog(commands.Cog):
     @app_commands.describe(user="The Discord user whose linked Roblox account should be inspected.")
     @admin_only()
     async def checkroblox(self, interaction: discord.Interaction, user: discord.User) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                if exc.code != 40060:
+                    raise
+
         if self.bot.http_session is None:
-            await interaction.response.send_message("The bot HTTP session is not ready yet. Try again in a moment.", ephemeral=True)
+            await interaction.followup.send("The bot HTTP session is not ready yet. Try again in a moment.", ephemeral=True)
             return
 
         try:
             record = await self.bot.services.oauth.get_link(user.id)
         except NotFoundError:
-            await interaction.response.send_message("That user does not have a linked Roblox account.", ephemeral=True)
+            await interaction.followup.send("That user does not have a linked Roblox account.", ephemeral=True)
             return
+
+        await self.bot.services.ownership.sync_linked_gamepass_ownerships(self.bot, user.id)
+        await self.bot.services.ownership.refresh_claim_role_membership(
+            self.bot,
+            user.id,
+            guild=interaction.guild,
+            sync_ownerships=False,
+        )
 
         profile = await self.bot.services.oauth.fetch_public_profile(self.bot.http_session, record.roblox_sub)
         owned_systems = await self.bot.services.ownership.list_user_systems(user.id)
@@ -107,7 +122,7 @@ class OAuthCog(commands.Cog):
         if profile.headshot_url:
             embed.set_thumbnail(url=profile.headshot_url)
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: SalesBot) -> None:

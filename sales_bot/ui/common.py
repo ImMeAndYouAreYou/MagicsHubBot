@@ -11,11 +11,69 @@ from sales_bot.exceptions import SalesBotError
 
 
 LOGGER = logging.getLogger(__name__)
+MISSING = discord.utils.MISSING
 
 ConfirmHandler = Callable[[discord.Interaction, "ConfirmView"], Awaitable[None]]
 SelectHandler = Callable[[discord.Interaction, Any, "PaginatedSelectView"], Awaitable[None]]
 OptionBuilder = Callable[[Any], discord.SelectOption]
 ValueGetter = Callable[[Any], str]
+
+
+async def defer_interaction_response(
+    interaction: discord.Interaction,
+    *,
+    ephemeral: bool = False,
+    thinking: bool = False,
+) -> None:
+    if interaction.response.is_done():
+        return
+
+    try:
+        await interaction.response.defer(ephemeral=ephemeral, thinking=thinking)
+    except discord.HTTPException as exc:
+        if exc.code != 40060:
+            raise
+
+
+async def send_interaction_response(
+    interaction: discord.Interaction,
+    content: str | None = None,
+    **kwargs: Any,
+) -> discord.Message | None:
+    responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+    try:
+        return await responder(content, **kwargs)
+    except discord.HTTPException as exc:
+        if exc.code in {40060, 10062}:
+            return None
+        raise
+
+
+async def edit_interaction_response(
+    interaction: discord.Interaction,
+    *,
+    content: str | None | Any = MISSING,
+    embed: discord.Embed | None | Any = MISSING,
+    view: discord.ui.View | None | Any = MISSING,
+) -> discord.InteractionMessage | None:
+    kwargs: dict[str, Any] = {}
+    if content is not MISSING:
+        kwargs["content"] = content
+    if embed is not MISSING:
+        kwargs["embed"] = embed
+    if view is not MISSING:
+        kwargs["view"] = view
+
+    if interaction.response.is_done():
+        try:
+            return await interaction.edit_original_response(**kwargs)
+        except discord.HTTPException as exc:
+            if exc.code in {40060, 10062}:
+                return None
+            raise
+
+    await interaction.response.edit_message(**kwargs)
+    return None
 
 
 class RestrictedView(discord.ui.View):
@@ -25,8 +83,7 @@ class RestrictedView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.actor_id:
-            responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
-            await responder("אין לך הרשאה להשתמש בפאנל הזה.", ephemeral=True)
+            await send_interaction_response(interaction, "אין לך הרשאה להשתמש בפאנל הזה.", ephemeral=True)
             return False
         return True
 
@@ -38,8 +95,7 @@ class RestrictedView(discord.ui.View):
     ) -> None:
         LOGGER.exception("View interaction error in %s", type(self).__name__, exc_info=error)
         message = str(error) if isinstance(error, SalesBotError) else "אירעה שגיאה לא צפויה בפאנל."
-        responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
-        await responder(message, ephemeral=True)
+        await send_interaction_response(interaction, message, ephemeral=True)
 
     def disable_all_items(self) -> None:
         for item in self.children:
@@ -66,6 +122,7 @@ class ConfirmView(RestrictedView):
         button: discord.ui.Button[Any],
     ) -> None:
         self.disable_all_items()
+        await defer_interaction_response(interaction)
         await self._on_confirm(interaction, self)
         self.stop()
 
@@ -89,6 +146,7 @@ class _PaginatedSelect(discord.ui.Select["PaginatedSelectView"]):
         super().__init__(placeholder=parent_view.placeholder, options=[])
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await defer_interaction_response(interaction)
         selected = self.parent_view.get_selected_item(self.values[0])
         await self.parent_view.on_selected(interaction, selected, self.parent_view)
 

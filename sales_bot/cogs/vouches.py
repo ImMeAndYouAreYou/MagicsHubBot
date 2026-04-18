@@ -8,7 +8,7 @@ from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
 from sales_bot.exceptions import NotFoundError
 from sales_bot.models import VouchRecord
-from sales_bot.ui.common import ConfirmView, PaginatedSelectView
+from sales_bot.ui.common import ConfirmView, PaginatedSelectView, edit_interaction_response
 from sales_bot.ui.vouches import VouchCreateModal
 
 
@@ -93,14 +93,16 @@ class VouchesCog(commands.Cog):
                     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                         pass
 
-                await confirm_interaction.response.edit_message(
+                await edit_interaction_response(
+                    confirm_interaction,
                     content="ההוכחה נמחקה בהצלחה.",
                     embed=None,
                     view=view,
                 )
 
             confirm_view = ConfirmView(actor_id=interaction.user.id, on_confirm=on_confirm)
-            await select_interaction.response.edit_message(
+            await edit_interaction_response(
+                select_interaction,
                 content="בדוק את פרטי ההוכחה לפני המחיקה.",
                 embed=embed,
                 view=confirm_view,

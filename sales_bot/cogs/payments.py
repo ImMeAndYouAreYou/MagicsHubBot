@@ -7,7 +7,7 @@ from discord.ext import commands
 from sales_bot.bot import SalesBot
 from sales_bot.checks import linked_roblox_required
 from sales_bot.exceptions import AlreadyExistsError, PermissionDeniedError
-from sales_bot.ui.common import PaginatedSelectView
+from sales_bot.ui.common import PaginatedSelectView, edit_interaction_response
 
 
 class PaymentsCog(commands.Cog):
@@ -55,7 +55,7 @@ class PaymentsCog(commands.Cog):
                     url=selected_system.paypal_link,
                 )
             )
-            await select_interaction.response.edit_message(embed=embed, view=link_view)
+            await edit_interaction_response(select_interaction, embed=embed, view=link_view)
 
         view = PaginatedSelectView(
             actor_id=interaction.user.id,
@@ -107,7 +107,7 @@ class PaymentsCog(commands.Cog):
                     url=gamepass_url,
                 )
             )
-            await select_interaction.response.edit_message(embed=embed, view=link_view)
+            await edit_interaction_response(select_interaction, embed=embed, view=link_view)
 
         view = PaginatedSelectView(
             actor_id=interaction.user.id,

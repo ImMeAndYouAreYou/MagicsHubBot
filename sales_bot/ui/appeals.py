@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import discord
 
-from sales_bot.ui.common import RestrictedView
+from sales_bot.ui.common import RestrictedView, defer_interaction_response, edit_interaction_response
 
 
 class AppealActionButton(discord.ui.Button["AppealDecisionView"]):
@@ -30,6 +30,8 @@ class AppealDecisionView(RestrictedView):
         self.add_item(AppealActionButton("reject", appeal_id))
 
     async def handle_action(self, interaction: discord.Interaction, action: str) -> None:
+        await defer_interaction_response(interaction)
+
         if action == "accept" and await self.bot.services.blacklist.is_blacklisted(self.requester_id):
             await self.bot.services.blacklist.remove_entry(self.requester_id)
 
@@ -59,5 +61,5 @@ class AppealDecisionView(RestrictedView):
             inline=False,
         )
         self.disable_all_items()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await edit_interaction_response(interaction, embed=embed, view=self)
         self.stop()

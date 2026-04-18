@@ -5,7 +5,7 @@ from typing import Any
 import discord
 
 from sales_bot.exceptions import ExternalServiceError, PermissionDeniedError
-from sales_bot.ui.common import RestrictedView
+from sales_bot.ui.common import RestrictedView, defer_interaction_response, edit_interaction_response
 
 
 def parse_vouch_rating(raw_value: str) -> int:
@@ -126,6 +126,8 @@ class VouchPreviewView(RestrictedView):
         interaction: discord.Interaction,
         button: discord.ui.Button[Any],
     ) -> None:
+        await defer_interaction_response(interaction)
+
         if not await self.bot.services.admins.is_admin(self.admin_user.id):
             raise PermissionDeniedError("המשתמש שבחרת כבר לא במערכת יותר, אנא בחר משתמש אחר")
 
@@ -152,7 +154,8 @@ class VouchPreviewView(RestrictedView):
         )
 
         self.disable_all_items()
-        await interaction.response.edit_message(
+        await edit_interaction_response(
+            interaction,
             content=f"הוכחה פורסמה ב <#{self.bot.settings.vouch_channel_id}>.",
             embed=self.build_preview_embed(),
             view=self,

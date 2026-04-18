@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import aiosqlite
+import discord
 
 from sales_bot.db import Database
 from sales_bot.exceptions import NotFoundError, PermissionDeniedError
 from sales_bot.models import DeliveryRecord, OwnedSystemRecord, SavedSystemRecord, SystemRecord
+
+if TYPE_CHECKING:
+    from sales_bot.bot import SalesBot
+
+
+CLAIMABLE_ROLE_ID = 1492480556385177650
 
 
 class OwnershipService:
@@ -142,6 +151,108 @@ class OwnershipService:
         )
         return {int(row["system_id"]) for row in rows}
 
+    async def sync_linked_gamepass_ownerships(
+        self,
+        bot: "SalesBot",
+        user_id: int,
+        *,
+        system_ids: set[int] | None = None,
+    ) -> list[SystemRecord]:
+        if bot.http_session is None:
+            return []
+
+        try:
+            await bot.services.oauth.get_link(user_id)
+        except NotFoundError:
+            return []
+
+        owned_ids = {ownership.system.id for ownership in await self.list_user_ownerships(user_id)}
+        systems = await bot.services.systems.list_robux_enabled_systems()
+        if system_ids is not None:
+            systems = [system for system in systems if system.id in system_ids]
+
+        newly_synced: list[SystemRecord] = []
+        for system in systems:
+            if system.id in owned_ids or not system.roblox_gamepass_id:
+                continue
+
+            owns_gamepass = await bot.services.oauth.linked_user_owns_gamepass(
+                bot.http_session,
+                discord_user_id=user_id,
+                gamepass_id=system.roblox_gamepass_id,
+            )
+            if not owns_gamepass:
+                continue
+
+            await self.grant_system(user_id, system.id, None, self.ROBLOX_CLAIM_SOURCE)
+            owned_ids.add(system.id)
+            newly_synced.append(system)
+
+        return sorted(newly_synced, key=lambda system: system.name.lower())
+
+    async def list_getsystem_available_systems(
+        self,
+        bot: "SalesBot",
+        user_id: int,
+    ) -> list[SystemRecord]:
+        await self.sync_linked_gamepass_ownerships(bot, user_id)
+
+        owned_ids = {system.id for system in await self.list_user_systems(user_id)}
+        transfer_locked = await self.list_transfer_locked_system_ids(user_id)
+
+        systems = await bot.services.systems.list_systems()
+        return [system for system in systems if system.id in owned_ids or system.id not in transfer_locked]
+
+    async def refresh_claim_role_membership(
+        self,
+        bot: "SalesBot",
+        user_id: int,
+        *,
+        guild: discord.Guild | None = None,
+        sync_ownerships: bool = True,
+    ) -> bool | None:
+        if sync_ownerships:
+            await self.sync_linked_gamepass_ownerships(bot, user_id)
+
+        target_guild = guild
+        if target_guild is None and bot.settings.primary_guild_id is not None:
+            target_guild = bot.get_guild(bot.settings.primary_guild_id)
+            if target_guild is None:
+                try:
+                    target_guild = await bot.fetch_guild(bot.settings.primary_guild_id)
+                except discord.HTTPException:
+                    return None
+
+        if target_guild is None:
+            return None
+
+        try:
+            member = target_guild.get_member(user_id)
+            if member is None:
+                member = await target_guild.fetch_member(user_id)
+        except discord.HTTPException:
+            return None
+
+        role = target_guild.get_role(CLAIMABLE_ROLE_ID)
+        if role is None:
+            return None
+
+        should_have_role = bool(await self.list_claim_role_owned_systems(user_id))
+        has_role = role in member.roles
+
+        if should_have_role and not has_role:
+            try:
+                await member.add_roles(role, reason=f"Ownership sync for {user_id}")
+            except discord.HTTPException:
+                return None
+        elif not should_have_role and has_role:
+            try:
+                await member.remove_roles(role, reason=f"Ownership sync for {user_id}")
+            except discord.HTTPException:
+                return None
+
+        return should_have_role
+
     async def transfer_all_systems(
         self,
         *,
@@ -223,10 +334,9 @@ class OwnershipService:
             JOIN systems s ON s.id = us.system_id
             WHERE us.user_id = ?
               AND us.source != ?
-              AND (us.granted_by IS NOT NULL OR us.source = ?)
             ORDER BY LOWER(s.name) ASC
             """,
-            (user_id, self.TRANSFER_SOURCE, self.ROBLOX_CLAIM_SOURCE),
+                        (user_id, self.TRANSFER_SOURCE),
         )
         return [self._map_system(row) for row in rows]
 

@@ -92,6 +92,7 @@ class Settings:
     order_channel_id: int
     roblox_verified_role_id: int
     ai_support_channel_id: int
+    ai_training_channel_id: int
     roblox_client_id: str | None
     roblox_client_secret: str | None
     roblox_redirect_uri: str | None
@@ -141,6 +142,8 @@ class Settings:
         roblox_entry_link = _optional_env("ROBLOX_ENTRY_LINK") or f"{public_base_url}/link"
         roblox_privacy_policy_url = _optional_env("ROBLOX_PRIVACY_POLICY_URL") or f"{public_base_url}/privacy"
         roblox_terms_url = _optional_env("ROBLOX_TERMS_URL") or f"{public_base_url}/terms"
+        ai_support_channel_id = _int_with_default("AI_SUPPORT_CHANNEL_ID", 1494689678975172710)
+        ai_training_channel_id = _optional_int("AI_TRAINING_CHANNEL_ID") or ai_support_channel_id
 
         settings = cls(
             discord_token=_require_env("DISCORD_TOKEN"),
@@ -151,7 +154,8 @@ class Settings:
             vouch_channel_id=_int_with_default("VOUCH_CHANNEL_ID", 1492468162372046908),
             order_channel_id=_int_with_default("ORDER_CHANNEL_ID", 1492472669059285012),
             roblox_verified_role_id=_int_with_default("ROBLOX_VERIFIED_ROLE_ID", 1494685982161768669),
-            ai_support_channel_id=_int_with_default("AI_SUPPORT_CHANNEL_ID", 1494689678975172710),
+            ai_support_channel_id=ai_support_channel_id,
+            ai_training_channel_id=ai_training_channel_id,
             roblox_client_id=_optional_env("ROBLOX_CLIENT_ID"),
             roblox_client_secret=_optional_env("ROBLOX_CLIENT_SECRET"),
             roblox_redirect_uri=roblox_redirect_uri,

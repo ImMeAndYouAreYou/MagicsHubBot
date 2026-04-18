@@ -53,6 +53,8 @@ MAX_LINK_TEXT_CHARS = 5_000
 MAX_ATTACHMENT_TEXT_CHARS = 5_000
 MAX_EXTERNAL_PROMPT_CHARS = 1_200
 MAX_STORED_SOURCE_CHARS = 5_000
+MAX_TRAINING_NOTE_CHARS = 20_000
+MAX_TRAINING_SOURCE_CHARS = 50_000
 MAX_IMAGE_ATTACHMENTS = 3
 MAX_IMAGE_BYTES = 4_000_000
 MAX_KNOWLEDGE_BLOCKS = 4
@@ -281,12 +283,12 @@ COMMAND_DETAIL_OVERRIDES: dict[str, dict[str, str]] = {
         "he": "יצירת גיבאווי לאדמינים בלבד. היא פותחת את פאנל הווב של הגיבאווי כדי לבנות ולפרסם גיבאווי שמור.",
     },
     "trainbot": {
-        "en": "Admin-only training mode. While it is active, admins can feed messages, files, links, and screenshots into the AI knowledge base and normal AI replies are paused.",
-        "he": "מצב אימון לאדמינים בלבד. בזמן שהוא פעיל, אדמינים יכולים להזין הודעות, קבצים, קישורים וצילומי מסך למאגר הידע של ה-AI, והתגובות הרגילות של ה-AI נעצרות.",
+        "en": "Admin-only training mode. While it is active, admins can feed messages, files, links, and screenshots into the AI knowledge base in the configured training channel.",
+        "he": "מצב אימון לאדמינים בלבד. בזמן שהוא פעיל, אדמינים יכולים להזין הודעות, קבצים, קישורים וצילומי מסך למאגר הידע של ה-AI בערוץ האימון המוגדר.",
     },
     "endtraining": {
-        "en": "Turns training mode off so the AI starts answering again in the support channel.",
-        "he": "מכבה את מצב האימון כדי שה-AI יחזור לענות בערוץ התמיכה.",
+        "en": "Turns training mode off so the training channel stops accepting new knowledge entries until /trainbot is used again.",
+        "he": "מכבה את מצב האימון כך שערוץ האימון יפסיק לקבל רשומות ידע חדשות עד שמריצים שוב /trainbot.",
     },
 }
 
@@ -385,7 +387,7 @@ class AIAssistantService:
         parts.append("Trusted admin training entry.")
         content = message.content.strip()
         if content:
-            parts.append(f"Admin training note:\n{self._truncate(content, MAX_STORED_SOURCE_CHARS)}")
+            parts.append(f"Admin training note:\n{self._truncate(content, MAX_TRAINING_NOTE_CHARS)}")
 
         if session is not None:
             parts.extend(await self._extract_message_text_sources(session, message, store_for_training=True))
@@ -413,6 +415,7 @@ class AIAssistantService:
     def build_training_acknowledgement(self, record: AIKnowledgeRecord) -> str:
         primary_summary: str | None = None
         primary_source: str | None = None
+        primary_filename: str | None = None
         attachment_names: list[str] = []
         seen_attachment_names: set[str] = set()
         public_link_count = 0
@@ -447,6 +450,7 @@ class AIAssistantService:
                 if body.strip() and primary_summary is None:
                     primary_summary = self._summarize_training_ack_text(body)
                     primary_source = "text-file"
+                    primary_filename = filename or None
                 continue
 
             if block.startswith("Public link "):
@@ -484,7 +488,16 @@ class AIAssistantService:
                 primary_source = "other"
 
         is_hebrew = _contains_hebrew(primary_summary or record.content)
-        if primary_summary:
+        if primary_source == "text-file" and primary_filename:
+            if is_hebrew:
+                message = f"למדתי ושמרתי את כל התוכן של {primary_filename}."
+                if primary_summary:
+                    message = f"{message} תצוגה מקדימה: {primary_summary}"
+            else:
+                message = f"I learned and saved the full contents of {primary_filename}."
+                if primary_summary:
+                    message = f"{message} Preview: {primary_summary}"
+        elif primary_summary:
             if is_hebrew:
                 message = f"למדתי ושמרתי: {primary_summary}"
             else:
@@ -800,7 +813,7 @@ class AIAssistantService:
             "- Custom orders / הזמנות אישיות: admins can send the custom order panel with /sendorderpanel to the configured order channel.\n"
             "- Ownership tools / כלי בעלות: admins can give, revoke, transfer, and inspect system ownership.\n"
             "- Vouches / הוכחות: the bot supports vouch creation and publishing to the configured vouch channel.\n"
-            "- AI training / אימון AI: admins can start training mode with /trainbot and stop it with /endtraining.\n"
+            "- AI training / אימון AI: admins can start training mode with /trainbot and stop it with /endtraining, using the configured AI training channel for new knowledge.\n"
             "- Rich AI inputs / קלט AI עשיר: the assistant can read screenshots, image attachments, public links, and text files."
         )
 
@@ -808,6 +821,7 @@ class AIAssistantService:
             "Current bot configuration summary / סיכום תצורה:\n"
             f"- Roblox OAuth enabled: {'yes' if self.settings.roblox_oauth_enabled else 'no'}.\n"
             f"- AI support channel ID: {self.settings.ai_support_channel_id}.\n"
+            f"- AI training channel ID: {self.settings.ai_training_channel_id}.\n"
             f"- Order channel ID: {self.settings.order_channel_id}.\n"
             f"- Vouch channel ID: {self.settings.vouch_channel_id}.\n"
             f"- Primary guild ID: {self.settings.primary_guild_id or 'not configured'}."
@@ -1015,7 +1029,7 @@ class AIAssistantService:
             if not decoded:
                 continue
 
-            limit = MAX_STORED_SOURCE_CHARS if store_for_training else MAX_ATTACHMENT_TEXT_CHARS
+            limit = MAX_TRAINING_SOURCE_CHARS if store_for_training else MAX_ATTACHMENT_TEXT_CHARS
             sources.append(
                 f"Text file {attachment.filename}:\n{self._truncate(decoded, limit)}"
             )
@@ -1038,7 +1052,7 @@ class AIAssistantService:
                 continue
             if not fetched_text:
                 continue
-            limit = MAX_STORED_SOURCE_CHARS if store_for_training else MAX_LINK_TEXT_CHARS
+            limit = MAX_TRAINING_SOURCE_CHARS if store_for_training else MAX_LINK_TEXT_CHARS
             sources.append(f"Public link {raw_url}:\n{self._truncate(fetched_text, limit)}")
         return sources
 
@@ -1073,7 +1087,7 @@ class AIAssistantService:
                 return "Image attachments were included, but Gemini quota was unavailable, so only non-image text could be stored."
             return "Image attachments were included, but live image extraction was unavailable, so only non-image text could be stored."
 
-        return f"Image training summary:\n{self._truncate(summary, MAX_STORED_SOURCE_CHARS)}"
+        return f"Image training summary:\n{self._truncate(summary, MAX_TRAINING_SOURCE_CHARS)}"
 
     async def _extract_image_parts(self, message: discord.Message) -> list[dict[str, Any]]:
         parts: list[dict[str, Any]] = []

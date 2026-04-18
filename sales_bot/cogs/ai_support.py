@@ -18,24 +18,37 @@ class AISupportCog(commands.Cog):
     def __init__(self, bot: SalesBot) -> None:
         self.bot = bot
 
-    def _is_ai_support_message(self, message: discord.Message) -> bool:
-        if message.channel.id == self.bot.settings.ai_support_channel_id:
+    def _matches_channel(self, message: discord.Message, channel_id: int) -> bool:
+        if message.channel.id == channel_id:
             return True
 
         channel = message.channel
         if isinstance(channel, discord.Thread):
-            return channel.parent_id == self.bot.settings.ai_support_channel_id
+            return channel.parent_id == channel_id
         return False
 
-    @app_commands.command(name="trainbot", description="Enable AI training mode in the configured AI support channel.")
+    def _is_ai_support_message(self, message: discord.Message) -> bool:
+        return self._matches_channel(message, self.bot.settings.ai_support_channel_id)
+
+    def _is_ai_training_message(self, message: discord.Message) -> bool:
+        return self._matches_channel(message, self.bot.settings.ai_training_channel_id)
+
+    @app_commands.command(name="trainbot", description="Enable AI training mode in the configured AI training channel.")
     @admin_only()
     async def trainbot(self, interaction: discord.Interaction) -> None:
         await self.bot.services.ai_assistant.start_training(interaction.user.id)
-        await interaction.response.send_message(
-            (
-                f"Training mode is now active. Send knowledge messages in <#{self.bot.settings.ai_support_channel_id}>. "
+        if self.bot.settings.ai_training_channel_id == self.bot.settings.ai_support_channel_id:
+            message = (
+                f"Training mode is now active. Send knowledge messages in <#{self.bot.settings.ai_training_channel_id}>. "
                 "While training mode is active, the assistant will not answer normal questions there, but it will confirm saved training entries."
-            ),
+            )
+        else:
+            message = (
+                f"Training mode is now active. Send knowledge messages in <#{self.bot.settings.ai_training_channel_id}>. "
+                f"The assistant will keep answering in <#{self.bot.settings.ai_support_channel_id}> while it confirms saved training entries in the training channel."
+            )
+        await interaction.response.send_message(
+            message,
             ephemeral=True,
         )
 
@@ -43,8 +56,15 @@ class AISupportCog(commands.Cog):
     @admin_only()
     async def endtraining(self, interaction: discord.Interaction) -> None:
         await self.bot.services.ai_assistant.end_training()
+        if self.bot.settings.ai_training_channel_id == self.bot.settings.ai_support_channel_id:
+            message = f"Training mode is off. The assistant will answer again in <#{self.bot.settings.ai_support_channel_id}>."
+        else:
+            message = (
+                f"Training mode is off. New knowledge messages in <#{self.bot.settings.ai_training_channel_id}> will no longer be stored "
+                "until you run /trainbot again."
+            )
         await interaction.response.send_message(
-            f"Training mode is off. The assistant will answer again in <#{self.bot.settings.ai_support_channel_id}>.",
+            message,
             ephemeral=True,
         )
 
@@ -52,13 +72,20 @@ class AISupportCog(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None:
             return
-        if not self._is_ai_support_message(message):
+
+        is_support_message = self._is_ai_support_message(message)
+        is_training_message = self._is_ai_training_message(message)
+        if not is_support_message and not is_training_message:
             return
 
         try:
             author_is_admin = await self.bot.services.admins.is_admin(message.author.id)
-            training_state = await self.bot.services.ai_assistant.get_training_state()
-            if training_state.is_active:
+            shared_channel = self.bot.settings.ai_support_channel_id == self.bot.settings.ai_training_channel_id
+            training_state = None
+            if is_training_message or (shared_channel and is_support_message):
+                training_state = await self.bot.services.ai_assistant.get_training_state()
+
+            if is_training_message and training_state is not None and training_state.is_active:
                 if author_is_admin:
                     try:
                         record = await self.bot.services.ai_assistant.add_training_message(message, self.bot.http_session)
@@ -119,11 +146,25 @@ class AISupportCog(commands.Cog):
                 else:
                     try:
                         await message.reply(
-                            "Training mode is active right now, so replies are paused until an admin ends training.",
+                            "Training mode is active here, but only admins can add knowledge entries until an admin ends training.",
                             mention_author=False,
                         )
                     except discord.HTTPException:
                         pass
+                return
+
+            if is_training_message and not is_support_message:
+                if author_is_admin:
+                    try:
+                        await message.reply(
+                            "Training mode is off in this channel. Run /trainbot before sending new knowledge here.",
+                            mention_author=False,
+                        )
+                    except discord.HTTPException:
+                        pass
+                return
+
+            if not is_support_message:
                 return
 
             if self.bot.http_session is None:

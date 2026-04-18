@@ -115,7 +115,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Admin-only web panels can create and edit reaction-based polls with custom emoji options, channel selection, stored IDs, and automatic close/result updates.
 - Admin-only web panels can create and edit giveaways with durations, winner counts, requirement text, stored IDs, and automatic winner selection when the timer expires.
 - Systems can be edited through an admin dropdown plus web editor, including metadata, file replacement, image replacement, PayPal link, and Roblox gamepass updates.
-- The AI assistant answers only in the configured support channel, prioritizes admin-trained local knowledge entries over built-in docs, can read screenshots, public links, and text files, can silently learn useful support-channel context outside `/trainbot`, and pauses normal replies while `/trainbot` mode is active.
+- The AI assistant answers in the configured support channel, can use a separate configured training channel for `/trainbot`, prioritizes admin-trained local knowledge entries over built-in docs, can read screenshots, public links, and text files, can silently learn useful support-channel context outside `/trainbot`, and if no training channel is configured it falls back to the support channel.
 
 ## Database Schema
 
@@ -165,6 +165,7 @@ Optional values:
 - `ROBLOX_TERMS_URL`
 - `ROBLOX_VERIFIED_ROLE_ID`
 - `AI_SUPPORT_CHANNEL_ID`
+- `AI_TRAINING_CHANNEL_ID`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
 - `PUBLIC_BASE_URL`
@@ -180,6 +181,8 @@ Optional values:
 - `SELF_PING_INTERVAL_SECONDS`
 
 If the Roblox OAuth variables are omitted, the bot still starts normally and the `/link` flow stays unavailable until those values are configured.
+
+If `AI_TRAINING_CHANNEL_ID` is omitted, `/trainbot` keeps using `AI_SUPPORT_CHANNEL_ID` as the training location.
 
 ## Render
 

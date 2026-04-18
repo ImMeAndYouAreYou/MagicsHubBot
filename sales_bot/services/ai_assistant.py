@@ -410,6 +410,133 @@ class AIAssistantService:
             source_message_id=message.id,
         )
 
+    def build_training_acknowledgement(self, record: AIKnowledgeRecord) -> str:
+        primary_summary: str | None = None
+        primary_source: str | None = None
+        attachment_names: list[str] = []
+        seen_attachment_names: set[str] = set()
+        public_link_count = 0
+        has_image_summary = False
+        image_notice: str | None = None
+        file_notice: str | None = None
+
+        for raw_block in re.split(r"\n\s*\n", record.content):
+            block = raw_block.strip()
+            if not block or block == "Trusted admin training entry.":
+                continue
+
+            if block.startswith("Admin training note:"):
+                note = block.removeprefix("Admin training note:").strip()
+                if note and primary_summary is None:
+                    primary_summary = self._summarize_training_ack_text(note)
+                    primary_source = "admin-note"
+                continue
+
+            if block.startswith("Text file skipped because it is too large:"):
+                if file_notice is None:
+                    file_notice = block
+                continue
+
+            if block.startswith("Text file "):
+                header, _, body = block.partition(":\n")
+                filename = header.removeprefix("Text file ").strip()
+                lowered_filename = filename.casefold()
+                if filename and lowered_filename not in seen_attachment_names:
+                    seen_attachment_names.add(lowered_filename)
+                    attachment_names.append(filename)
+                if body.strip() and primary_summary is None:
+                    primary_summary = self._summarize_training_ack_text(body)
+                    primary_source = "text-file"
+                continue
+
+            if block.startswith("Public link "):
+                public_link_count += 1
+                _, _, body = block.partition(":\n")
+                if body.strip() and primary_summary is None:
+                    primary_summary = self._summarize_training_ack_text(body)
+                    primary_source = "link"
+                continue
+
+            if block.startswith("Image training summary:"):
+                has_image_summary = True
+                summary = block.removeprefix("Image training summary:").strip()
+                if summary and primary_summary is None:
+                    primary_summary = self._summarize_training_ack_text(summary)
+                    primary_source = "image"
+                continue
+
+            if block.startswith("Image attachments were included, but"):
+                if image_notice is None:
+                    image_notice = block
+                continue
+
+            if block.startswith("Attachment references:"):
+                for line in block.splitlines()[1:]:
+                    filename = line.split(":", 1)[0].strip()
+                    lowered_filename = filename.casefold()
+                    if filename and lowered_filename not in seen_attachment_names:
+                        seen_attachment_names.add(lowered_filename)
+                        attachment_names.append(filename)
+                continue
+
+            if primary_summary is None:
+                primary_summary = self._summarize_training_ack_text(block)
+                primary_source = "other"
+
+        is_hebrew = _contains_hebrew(primary_summary or record.content)
+        if primary_summary:
+            if is_hebrew:
+                message = f"למדתי ושמרתי: {primary_summary}"
+            else:
+                message = f"I learned and saved this: {primary_summary}"
+        elif is_hebrew:
+            message = "למדתי ושמרתי את האימון החדש."
+        else:
+            message = "I learned and saved that training entry."
+
+        source_parts: list[str] = []
+        if attachment_names and primary_source != "text-file":
+            displayed_names = ", ".join(attachment_names[:2])
+            remaining_count = len(attachment_names) - 2
+            if remaining_count > 0:
+                if is_hebrew:
+                    displayed_names = f"{displayed_names} ועוד {remaining_count}"
+                else:
+                    displayed_names = f"{displayed_names}, plus {remaining_count} more"
+            if is_hebrew:
+                source_parts.append(f"פרטים מתוך {displayed_names}")
+            else:
+                source_parts.append(f"context from {displayed_names}")
+
+        if public_link_count and primary_source != "link":
+            if is_hebrew:
+                if public_link_count == 1:
+                    source_parts.append("קישור ציבורי אחד")
+                else:
+                    source_parts.append(f"{public_link_count} קישורים ציבוריים")
+            elif public_link_count == 1:
+                source_parts.append("1 public link")
+            else:
+                source_parts.append(f"{public_link_count} public links")
+
+        if has_image_summary and primary_source != "image":
+            if is_hebrew:
+                source_parts.append("סיכום תמונה")
+            else:
+                source_parts.append("an image summary")
+
+        if source_parts:
+            if is_hebrew:
+                message = f"{message} שמרתי גם {self._join_short_phrases(source_parts, is_hebrew=True)}."
+            else:
+                message = f"{message} I also stored {self._join_short_phrases(source_parts, is_hebrew=False)}."
+        elif image_notice is not None and primary_source != "image":
+            message = f"{message} {self._truncate(image_notice, 160)}"
+        elif file_notice is not None and primary_source != "text-file":
+            message = f"{message} {self._truncate(file_notice, 160)}"
+
+        return self._truncate(message, 480)
+
     async def maybe_learn_from_message(
         self,
         message: discord.Message,
@@ -1866,6 +1993,36 @@ class AIAssistantService:
     def _looks_like_quota_error(message: str) -> bool:
         lowered = message.casefold()
         return "quota" in lowered or "rate limit" in lowered or "429" in lowered or "exceeded" in lowered
+
+    def _summarize_training_ack_text(self, text: str, *, limit: int = 220) -> str:
+        candidate_lines: list[str] = []
+        for raw_line in text.splitlines():
+            line = re.sub(r"\s+", " ", raw_line.strip(" -•\t"))
+            if not line:
+                continue
+            candidate_lines.append(line)
+            if len(candidate_lines) >= 2:
+                break
+
+        if not candidate_lines:
+            return self._truncate(re.sub(r"\s+", " ", text), limit)
+        if len(candidate_lines) >= 2 and candidate_lines[0].endswith(":"):
+            return self._truncate(f"{candidate_lines[0]} {candidate_lines[1]}", limit)
+        return self._truncate("; ".join(candidate_lines[:2]), limit)
+
+    @staticmethod
+    def _join_short_phrases(parts: Sequence[str], *, is_hebrew: bool) -> str:
+        cleaned = [part.strip() for part in parts if part.strip()]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            separator = " ו" if is_hebrew else " and "
+            return f"{cleaned[0]}{separator}{cleaned[1]}"
+        if is_hebrew:
+            return ", ".join(cleaned[:-1]) + f" ו{cleaned[-1]}"
+        return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
 
     @staticmethod
     def _truncate(value: str, limit: int) -> str:

@@ -20,7 +20,7 @@ class AISupportCog(commands.Cog):
         await interaction.response.send_message(
             (
                 f"Training mode is now active. Send knowledge messages in <#{self.bot.settings.ai_support_channel_id}>. "
-                "While training mode is active, the assistant will not answer questions there."
+                "While training mode is active, the assistant will not answer normal questions there, but it will confirm saved training entries."
             ),
             ephemeral=True,
         )
@@ -47,8 +47,13 @@ class AISupportCog(commands.Cog):
             if author_is_admin:
                 record = await self.bot.services.ai_assistant.add_training_message(message, self.bot.http_session)
                 if record is not None:
+                    training_reply = self.bot.services.ai_assistant.build_training_acknowledgement(record)
                     try:
                         await message.add_reaction("💾")
+                    except discord.HTTPException:
+                        pass
+                    try:
+                        await message.reply(training_reply, mention_author=False)
                     except discord.HTTPException:
                         pass
             else:

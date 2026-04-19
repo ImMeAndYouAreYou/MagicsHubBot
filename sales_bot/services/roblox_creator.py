@@ -4,7 +4,7 @@ import json
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import urlencode
 
 import aiohttp
@@ -306,9 +306,10 @@ class RobloxCreatorService:
                 game_pass_id=game_pass_id,
             ),
         )
-        if not isinstance(data, dict):
+        gamepass = self._extract_gamepass_from_response(data)
+        if gamepass is None:
             raise ExternalServiceError("Roblox returned an unexpected game pass response.")
-        return self._map_gamepass(data)
+        return gamepass
 
     async def create_gamepass(
         self,
@@ -325,7 +326,8 @@ class RobloxCreatorService:
     ) -> RobloxGamePassRecord:
         self.ensure_gamepass_management_configured()
         form = aiohttp.FormData()
-        form.add_field("name", name.strip())
+        normalized_name = name.strip()
+        form.add_field("name", normalized_name)
         if description is not None:
             form.add_field("description", description.strip())
         form.add_field("isForSale", self._bool_to_form_value(is_for_sale))
@@ -348,10 +350,24 @@ class RobloxCreatorService:
             method="POST",
             url=self.CREATE_GAMEPASS_ENDPOINT.format(universe_id=self.settings.roblox_owner_universe_id),
             data=form,
+            accept_error_response=self._is_gamepass_collection_response,
         )
+        gamepass = self._extract_gamepass_from_response(data, expected_name=normalized_name)
+        if gamepass is not None:
+            return gamepass
+
+        fallback_gamepass = await self._find_recent_gamepass_by_name(
+            bot,
+            guild_id,
+            discord_user_id,
+            name=normalized_name,
+        )
+        if fallback_gamepass is not None:
+            return fallback_gamepass
+
         if not isinstance(data, dict):
             raise ExternalServiceError("Roblox returned an unexpected game pass creation response.")
-        return self._map_gamepass(data)
+        raise ExternalServiceError("Roblox returned an unexpected game pass creation response.")
 
     async def update_gamepass(
         self,
@@ -428,6 +444,7 @@ class RobloxCreatorService:
         params: dict[str, str | int] | None = None,
         data: Any = None,
         allow_no_content: bool = False,
+        accept_error_response: Callable[[int, dict[str, Any] | list[Any] | str | None], bool] | None = None,
     ) -> dict[str, Any] | list[Any] | str | None:
         session = bot.http_session
         if session is None:
@@ -444,6 +461,8 @@ class RobloxCreatorService:
                     access_token = await self._get_access_token(bot, guild_id, discord_user_id, force_refresh=True)
                     continue
                 if response.status >= 400:
+                    if accept_error_response is not None and accept_error_response(response.status, response_data):
+                        return response_data
                     raise ExternalServiceError(
                         self._roblox_error_message(response_data, f"Roblox request failed for {method} {url}.")
                     )
@@ -542,22 +561,143 @@ class RobloxCreatorService:
             linked_at=str(row["linked_at"]),
         )
 
-    def _map_gamepass(self, data: dict[str, Any]) -> RobloxGamePassRecord:
-        price_information = data.get("priceInformation")
-        price_in_robux: int | None = None
-        if isinstance(price_information, dict) and price_information.get("defaultPriceInRobux") is not None:
-            price_in_robux = int(price_information["defaultPriceInRobux"])
+    async def _find_recent_gamepass_by_name(
+        self,
+        bot: "SalesBot",
+        guild_id: int,
+        discord_user_id: int,
+        *,
+        name: str,
+    ) -> RobloxGamePassRecord | None:
+        gamepasses = await self.list_gamepasses(bot, guild_id, discord_user_id)
+        exact_matches = [gamepass for gamepass in gamepasses if gamepass.name == name]
+        if not exact_matches:
+            normalized_name = name.casefold()
+            exact_matches = [gamepass for gamepass in gamepasses if gamepass.name.casefold() == normalized_name]
+        if not exact_matches:
+            return None
 
-        icon_asset_id = data.get("iconAssetId")
+        candidate = max(
+            exact_matches,
+            key=lambda item: (item.updated_at, item.created_at, item.game_pass_id),
+        )
+        try:
+            return await self.get_gamepass(bot, guild_id, discord_user_id, candidate.game_pass_id)
+        except ExternalServiceError:
+            return candidate
+
+    def _extract_gamepass_from_response(
+        self,
+        data: dict[str, Any] | list[Any] | str | None,
+        *,
+        expected_name: str | None = None,
+    ) -> RobloxGamePassRecord | None:
+        if not isinstance(data, dict):
+            return None
+
+        if self._looks_like_gamepass_payload(data):
+            return self._map_gamepass(data)
+
+        raw_gamepasses = data.get("gamePasses")
+        if not isinstance(raw_gamepasses, list):
+            return None
+
+        payload = self._select_gamepass_payload(raw_gamepasses, expected_name=expected_name)
+        if payload is None:
+            return None
+        return self._map_gamepass(payload)
+
+    def _map_gamepass(self, data: dict[str, Any]) -> RobloxGamePassRecord:
+        game_pass_id = self._coerce_optional_int(data.get("gamePassId"))
+        if game_pass_id is None:
+            game_pass_id = self._coerce_optional_int(data.get("id"))
+        if game_pass_id is None:
+            raise ExternalServiceError("Roblox returned a game pass without an ID.")
+
+        icon_asset_id = self._coerce_optional_int(data.get("iconAssetId"))
+        if icon_asset_id is None:
+            icon_asset_id = self._coerce_optional_int(data.get("displayIconImageAssetId"))
+
         return RobloxGamePassRecord(
-            game_pass_id=int(data["gamePassId"]),
-            name=str(data.get("name") or "Unnamed Game Pass"),
-            description=str(data.get("description") or ""),
-            is_for_sale=bool(data.get("isForSale")),
-            icon_asset_id=int(icon_asset_id) if icon_asset_id is not None else None,
-            price_in_robux=price_in_robux,
-            created_at=str(data.get("createdTimestamp") or ""),
-            updated_at=str(data.get("updatedTimestamp") or ""),
+            game_pass_id=game_pass_id,
+            name=str(data.get("name") or data.get("displayName") or "Unnamed Game Pass"),
+            description=str(data.get("description") or data.get("displayDescription") or ""),
+            is_for_sale=self._coerce_bool(data.get("isForSale")),
+            icon_asset_id=icon_asset_id,
+            price_in_robux=self._extract_price_in_robux(data),
+            created_at=str(data.get("createdTimestamp") or data.get("created") or ""),
+            updated_at=str(data.get("updatedTimestamp") or data.get("updated") or ""),
+        )
+
+    @staticmethod
+    def _select_gamepass_payload(
+        raw_gamepasses: list[Any],
+        *,
+        expected_name: str | None = None,
+    ) -> dict[str, Any] | None:
+        payloads = [item for item in raw_gamepasses if isinstance(item, dict)]
+        if not payloads:
+            return None
+
+        if expected_name:
+            exact_matches = [
+                item
+                for item in payloads
+                if str(item.get("name") or item.get("displayName") or "").strip() == expected_name
+            ]
+            if exact_matches:
+                return max(exact_matches, key=RobloxCreatorService._raw_gamepass_sort_key)
+
+            normalized_name = expected_name.casefold()
+            casefold_matches = [
+                item
+                for item in payloads
+                if str(item.get("name") or item.get("displayName") or "").strip().casefold() == normalized_name
+            ]
+            if casefold_matches:
+                return max(casefold_matches, key=RobloxCreatorService._raw_gamepass_sort_key)
+
+        if len(payloads) == 1:
+            return payloads[0]
+        return None
+
+    @staticmethod
+    def _looks_like_gamepass_payload(data: dict[str, Any]) -> bool:
+        return any(key in data for key in ("gamePassId", "id")) and any(
+            key in data for key in ("name", "displayName")
+        )
+
+    @staticmethod
+    def _is_gamepass_collection_response(status: int, data: dict[str, Any] | list[Any] | str | None) -> bool:
+        if status < 400 or not isinstance(data, dict):
+            return False
+        raw_gamepasses = data.get("gamePasses")
+        return isinstance(raw_gamepasses, list) and any(isinstance(item, dict) for item in raw_gamepasses)
+
+    @staticmethod
+    def _extract_price_in_robux(data: dict[str, Any]) -> int | None:
+        price_information = data.get("priceInformation")
+        if isinstance(price_information, dict):
+            for key in ("defaultPriceInRobux", "priceInRobux", "price"):
+                price_value = RobloxCreatorService._coerce_optional_int(price_information.get(key))
+                if price_value is not None:
+                    return price_value
+
+        for key in ("priceInRobux", "defaultPriceInRobux", "price"):
+            price_value = RobloxCreatorService._coerce_optional_int(data.get(key))
+            if price_value is not None:
+                return price_value
+        return None
+
+    @staticmethod
+    def _raw_gamepass_sort_key(data: dict[str, Any]) -> tuple[str, str, int]:
+        game_pass_id = RobloxCreatorService._coerce_optional_int(data.get("gamePassId"))
+        if game_pass_id is None:
+            game_pass_id = RobloxCreatorService._coerce_optional_int(data.get("id")) or 0
+        return (
+            str(data.get("updatedTimestamp") or data.get("updated") or ""),
+            str(data.get("createdTimestamp") or data.get("created") or ""),
+            game_pass_id,
         )
 
     @staticmethod
@@ -615,6 +755,21 @@ class RobloxCreatorService:
         except (TypeError, ValueError):
             return fallback
         return parsed if parsed > 0 else fallback
+
+    @staticmethod
+    def _coerce_optional_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
 
     @staticmethod
     def _bool_to_form_value(value: bool) -> str:

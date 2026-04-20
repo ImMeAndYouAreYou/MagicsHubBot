@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
@@ -32,6 +33,9 @@ class RobloxCreatorService:
     OAUTH_SCOPES = ("openid", "profile", "game-pass:read", "game-pass:write")
     STATE_LIFETIME_MINUTES = 60
     TOKEN_REFRESH_GRACE_SECONDS = 60
+    CREATE_GAMEPASS_LOOKUP_ATTEMPTS = 4
+    CREATE_GAMEPASS_LOOKUP_DELAY_SECONDS = 1.0
+    CREATE_GAMEPASS_LOOKUP_CLOCK_SKEW_SECONDS = 30
 
     def __init__(self, database: Database, settings: Settings) -> None:
         self.database = database
@@ -327,6 +331,7 @@ class RobloxCreatorService:
         self.ensure_gamepass_management_configured()
         form = aiohttp.FormData()
         normalized_name = name.strip()
+        request_started_at = datetime.now(UTC)
         form.add_field("name", normalized_name)
         if description is not None:
             form.add_field("description", description.strip())
@@ -343,26 +348,48 @@ class RobloxCreatorService:
                 content_type=content_type or "application/octet-stream",
             )
 
-        data = await self._authorized_request(
-            bot,
-            guild_id=guild_id,
-            discord_user_id=discord_user_id,
-            method="POST",
-            url=self.CREATE_GAMEPASS_ENDPOINT.format(universe_id=self.settings.roblox_owner_universe_id),
-            data=form,
-            accept_error_response=self._is_gamepass_collection_response,
-        )
+        try:
+            data = await self._authorized_request(
+                bot,
+                guild_id=guild_id,
+                discord_user_id=discord_user_id,
+                method="POST",
+                url=self.CREATE_GAMEPASS_ENDPOINT.format(universe_id=self.settings.roblox_owner_universe_id),
+                data=form,
+                accept_error_response=self._is_gamepass_collection_response,
+            )
+        except ExternalServiceError:
+            fallback_gamepass = await self._wait_for_recent_gamepass_by_name(
+                bot,
+                guild_id,
+                discord_user_id,
+                name=normalized_name,
+                not_before=request_started_at,
+            )
+            if fallback_gamepass is not None:
+                LOGGER.warning(
+                    "Roblox reported create failure for game pass %r, but the game pass appeared shortly after the request.",
+                    normalized_name,
+                )
+                return fallback_gamepass
+            raise
+
         gamepass = self._extract_gamepass_from_response(data, expected_name=normalized_name)
         if gamepass is not None:
             return gamepass
 
-        fallback_gamepass = await self._find_recent_gamepass_by_name(
+        fallback_gamepass = await self._wait_for_recent_gamepass_by_name(
             bot,
             guild_id,
             discord_user_id,
             name=normalized_name,
+            not_before=request_started_at,
         )
         if fallback_gamepass is not None:
+            LOGGER.warning(
+                "Roblox returned an unexpected create response for game pass %r, but the game pass appeared shortly after the request.",
+                normalized_name,
+            )
             return fallback_gamepass
 
         if not isinstance(data, dict):
@@ -464,7 +491,10 @@ class RobloxCreatorService:
                     if accept_error_response is not None and accept_error_response(response.status, response_data):
                         return response_data
                     raise ExternalServiceError(
-                        self._roblox_error_message(response_data, f"Roblox request failed for {method} {url}.")
+                        self._roblox_error_message(
+                            response_data,
+                            f"Roblox request failed ({response.status}) for {method} {url}.",
+                        )
                     )
                 return response_data
 
@@ -568,6 +598,7 @@ class RobloxCreatorService:
         discord_user_id: int,
         *,
         name: str,
+        not_before: datetime | None = None,
     ) -> RobloxGamePassRecord | None:
         gamepasses = await self.list_gamepasses(bot, guild_id, discord_user_id)
         exact_matches = [gamepass for gamepass in gamepasses if gamepass.name == name]
@@ -577,6 +608,15 @@ class RobloxCreatorService:
         if not exact_matches:
             return None
 
+        if not_before is not None:
+            exact_matches = [
+                gamepass
+                for gamepass in exact_matches
+                if self._gamepass_matches_creation_window(gamepass, not_before)
+            ]
+            if not exact_matches:
+                return None
+
         candidate = max(
             exact_matches,
             key=lambda item: (item.updated_at, item.created_at, item.game_pass_id),
@@ -585,6 +625,51 @@ class RobloxCreatorService:
             return await self.get_gamepass(bot, guild_id, discord_user_id, candidate.game_pass_id)
         except ExternalServiceError:
             return candidate
+
+    async def _wait_for_recent_gamepass_by_name(
+        self,
+        bot: "SalesBot",
+        guild_id: int,
+        discord_user_id: int,
+        *,
+        name: str,
+        not_before: datetime,
+    ) -> RobloxGamePassRecord | None:
+        for attempt in range(self.CREATE_GAMEPASS_LOOKUP_ATTEMPTS):
+            try:
+                gamepass = await self._find_recent_gamepass_by_name(
+                    bot,
+                    guild_id,
+                    discord_user_id,
+                    name=name,
+                    not_before=not_before,
+                )
+            except ExternalServiceError:
+                gamepass = None
+
+            if gamepass is not None:
+                return gamepass
+
+            if attempt < self.CREATE_GAMEPASS_LOOKUP_ATTEMPTS - 1:
+                await asyncio.sleep(self.CREATE_GAMEPASS_LOOKUP_DELAY_SECONDS)
+
+        return None
+
+    def _gamepass_matches_creation_window(
+        self,
+        gamepass: RobloxGamePassRecord,
+        not_before: datetime,
+    ) -> bool:
+        threshold = not_before - timedelta(seconds=self.CREATE_GAMEPASS_LOOKUP_CLOCK_SKEW_SECONDS)
+        for value in (gamepass.updated_at, gamepass.created_at):
+            if not value:
+                continue
+            try:
+                if self._parse_datetime(value) >= threshold:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
 
     def _extract_gamepass_from_response(
         self,
@@ -732,11 +817,32 @@ class RobloxCreatorService:
                             return str(value)
                 return str(first_error)
 
-        if isinstance(data, list) and data:
-            return str(data[0])
+            serialized = RobloxCreatorService._serialize_error_payload(data)
+            if serialized:
+                return serialized
+
+        if isinstance(data, list):
+            if data:
+                first_item = data[0]
+                if isinstance(first_item, (dict, list)):
+                    serialized = RobloxCreatorService._serialize_error_payload(first_item)
+                    if serialized:
+                        return serialized
+                return str(first_item)
+            return default
         if isinstance(data, str) and data.strip():
             return data.strip()
         return default
+
+    @staticmethod
+    def _serialize_error_payload(data: dict[str, Any] | list[Any]) -> str | None:
+        try:
+            serialized = json.dumps(data, ensure_ascii=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            return None
+        if not serialized:
+            return None
+        return serialized[:400]
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime:

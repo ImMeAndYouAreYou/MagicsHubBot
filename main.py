@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
+import sys
 
 import aiohttp
 
@@ -14,6 +16,27 @@ from sales_bot.logging_config import configure_logging
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _resolve_build_label() -> str:
+    for env_key in ("RENDER_GIT_COMMIT", "RENDER_GIT_BRANCH"):
+        value = os.getenv(env_key, "").strip()
+        if value:
+            return f"{env_key}={value}"
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "commit=unknown"
+
+    commit = result.stdout.strip()
+    return f"commit={commit}" if commit else "commit=unknown"
 
 
 async def self_ping_loop(settings: Settings) -> None:
@@ -41,6 +64,7 @@ async def self_ping_loop(settings: Settings) -> None:
 async def main() -> None:
     load_dotenv()
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
+    LOGGER.info("Booting SalesBot with %s on Python %s", _resolve_build_label(), sys.version.split()[0])
 
     try:
         settings = Settings.from_env()

@@ -329,7 +329,7 @@ class RobloxCreatorService:
         image_upload: tuple[str, bytes, str | None] | None = None,
     ) -> RobloxGamePassRecord:
         self.ensure_gamepass_management_configured()
-        form = aiohttp.FormData()
+        form = aiohttp.FormData(default_to_multipart=True)
         normalized_name = name.strip()
         request_started_at = datetime.now(UTC)
         form.add_field("name", normalized_name)
@@ -411,7 +411,7 @@ class RobloxCreatorService:
         image_upload: tuple[str, bytes, str | None] | None = None,
     ) -> RobloxGamePassRecord:
         self.ensure_gamepass_management_configured()
-        form = aiohttp.FormData()
+        form = aiohttp.FormData(default_to_multipart=True)
         changed = False
 
         if name is not None:

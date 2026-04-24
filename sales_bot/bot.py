@@ -142,18 +142,14 @@ class SalesBot(commands.Bot):
                 LOGGER.info("Synced %s commands to dev guild %s", len(synced), self.settings.dev_guild_id)
                 return
 
-            synced = await self.tree.sync()
-            LOGGER.info("Synced %s global commands", len(synced))
-
             if self.settings.primary_guild_id:
                 guild = discord.Object(id=self.settings.primary_guild_id)
-                self.tree.copy_global_to(guild=guild)
-                guild_synced = await self.tree.sync(guild=guild)
-                LOGGER.info(
-                    "Synced %s commands to primary guild %s",
-                    len(guild_synced),
-                    self.settings.primary_guild_id,
-                )
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)
+                LOGGER.info("Cleared guild-only command overrides for primary guild %s", self.settings.primary_guild_id)
+
+            synced = await self.tree.sync()
+            LOGGER.info("Synced %s global commands", len(synced))
 
     def _schedule_command_resync(self) -> None:
         if self._command_sync_lock.locked():
@@ -225,7 +221,7 @@ class SalesBot(commands.Bot):
         original_error = getattr(error, "original", error)
 
         if isinstance(original_error, discord.NotFound) and original_error.code == 10062:
-            LOGGER.info("Ignoring expired interaction error handling after command response race")
+            LOGGER.debug("Ignoring expired interaction error handling after command response race")
             return
 
         if isinstance(original_error, discord.HTTPException) and original_error.code == 40060:

@@ -9,9 +9,23 @@ from sales_bot.models import OrderRequestRecord
 
 class OrderService:
     ACTIVE_STATUSES = ("pending", "accepted")
+    PAYMENT_METHODS = (
+        ("paypal", "פייפאל"),
+        ("bit", "ביט"),
+        ("robux", "רובקס"),
+        ("users_under_2014", "משתמשים מתחת לשנת 2014"),
+        ("jailbreak_items", "דברים במשחק JailBreak"),
+    )
 
     def __init__(self, database: Database) -> None:
         self.database = database
+        self._payment_labels = {key: label for key, label in self.PAYMENT_METHODS}
+
+    def available_payment_methods(self) -> tuple[tuple[str, str], ...]:
+        return self.PAYMENT_METHODS
+
+    def payment_label(self, key: str) -> str:
+        return self._payment_labels.get(key, key)
 
     async def create_request(
         self,
@@ -21,13 +35,29 @@ class OrderService:
         required_timeframe: str,
         payment_method: str,
         offered_price: str,
+        roblox_username: str,
     ) -> OrderRequestRecord:
+        payment_method_label = self._normalize_payment_method(payment_method)
         order_id = await self.database.insert(
             """
-            INSERT INTO order_requests (user_id, requested_item, required_timeframe, payment_method, offered_price)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO order_requests (
+                user_id,
+                requested_item,
+                required_timeframe,
+                payment_method,
+                offered_price,
+                roblox_username
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user_id, requested_item.strip(), required_timeframe.strip(), payment_method.strip(), offered_price.strip()),
+            (
+                user_id,
+                requested_item.strip(),
+                required_timeframe.strip(),
+                payment_method_label,
+                offered_price.strip(),
+                roblox_username.strip(),
+            ),
         )
         return await self.get_request(order_id)
 
@@ -38,16 +68,20 @@ class OrderService:
         return self._map_order(row)
 
     async def list_pending_requests(self) -> list[OrderRequestRecord]:
-        rows = await self.database.fetchall(
-            "SELECT * FROM order_requests WHERE status = 'pending' ORDER BY submitted_at ASC"
-        )
-        return [self._map_order(row) for row in rows]
+        return await self.list_requests(statuses=("pending",))
 
     async def list_active_requests(self) -> list[OrderRequestRecord]:
-        rows = await self.database.fetchall(
-            "SELECT * FROM order_requests WHERE status IN (?, ?) ORDER BY submitted_at ASC",
-            self.ACTIVE_STATUSES,
-        )
+        return await self.list_requests(statuses=self.ACTIVE_STATUSES)
+
+    async def list_requests(self, *, statuses: tuple[str, ...] | None = None) -> list[OrderRequestRecord]:
+        query = "SELECT * FROM order_requests"
+        parameters: tuple[object, ...] = ()
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            query += f" WHERE status IN ({placeholders})"
+            parameters = tuple(statuses)
+        query += " ORDER BY submitted_at DESC, id DESC"
+        rows = await self.database.fetchall(query, parameters)
         return [self._map_order(row) for row in rows]
 
     async def set_owner_message(self, order_id: int, message_id: int) -> None:
@@ -56,7 +90,13 @@ class OrderService:
             (message_id, order_id),
         )
 
-    async def resolve_request(self, order_id: int, reviewer_id: int, status: str) -> OrderRequestRecord:
+    async def resolve_request(
+        self,
+        order_id: int,
+        reviewer_id: int,
+        status: str,
+        admin_reply: str | None = None,
+    ) -> OrderRequestRecord:
         if status not in {"accepted", "rejected", "completed"}:
             raise PermissionDeniedError("סטטוס הזמנה לא תקין.")
 
@@ -70,12 +110,26 @@ class OrderService:
         await self.database.execute(
             """
             UPDATE order_requests
-            SET status = ?, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
+            SET status = ?, admin_reply = ?, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
             WHERE id = ?
             """,
-            (status, reviewer_id, order_id),
+            (status, admin_reply.strip() if admin_reply else None, reviewer_id, order_id),
         )
         return await self.get_request(order_id)
+
+    def _normalize_payment_method(self, payment_method: str) -> str:
+        raw_value = payment_method.strip()
+        if not raw_value:
+            raise PermissionDeniedError("חובה לבחור שיטת תשלום.")
+        if raw_value in self._payment_labels:
+            return self.payment_label(raw_value)
+
+        normalized = raw_value.casefold()
+        for key, label in self.PAYMENT_METHODS:
+            if label.casefold() == normalized or key.casefold() == normalized:
+                return label
+
+        raise PermissionDeniedError("נבחרה שיטת תשלום לא תקינה.")
 
     @staticmethod
     def _map_order(row: aiosqlite.Row) -> OrderRequestRecord:
@@ -86,8 +140,10 @@ class OrderService:
             required_timeframe=str(row["required_timeframe"]),
             payment_method=str(row["payment_method"]),
             offered_price=str(row["offered_price"]),
+            roblox_username=str(row["roblox_username"]) if row["roblox_username"] else None,
             status=str(row["status"]),
             owner_message_id=int(row["owner_message_id"]) if row["owner_message_id"] is not None else None,
+            admin_reply=str(row["admin_reply"]) if row["admin_reply"] else None,
             submitted_at=str(row["submitted_at"]),
             reviewed_at=str(row["reviewed_at"]) if row["reviewed_at"] else None,
             reviewed_by=int(row["reviewed_by"]) if row["reviewed_by"] is not None else None,

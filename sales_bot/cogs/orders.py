@@ -10,7 +10,7 @@ from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
 from sales_bot.exceptions import ExternalServiceError
 from sales_bot.ui.common import PaginatedSelectView, edit_interaction_response
-from sales_bot.ui.orders import OrderManagementView, OrderPanelView, build_order_record_embed
+from sales_bot.ui.orders import OrderManagementView, OrderPanelWebsiteView, build_order_record_embed
 
 
 class OrdersCog(commands.Cog):
@@ -37,10 +37,10 @@ class OrdersCog(commands.Cog):
 
         embed = discord.Embed(
             title="הזמנות בהכנה אישית",
-            description="לחצו על הכפתור כאן למטה בכדי להזמין מערכת / משהו אחר ממגיק (המייסד) בהכנה אישית.",
+            description="לחצו על הכפתור כאן למטה כדי לעבור לדף ההזמנה באתר, להתחבר עם Discord, ולמלא את כל פרטי ההזמנה האישית.",
             color=discord.Color.gold(),
         )
-        view = OrderPanelView(self.bot)
+        view = OrderPanelWebsiteView(self.bot)
         await channel.send(embed=embed, view=view)
         await interaction.followup.send(f"פאנל ההזמנות נשלח ל-<#{self.bot.settings.order_channel_id}>.", ephemeral=True)
 

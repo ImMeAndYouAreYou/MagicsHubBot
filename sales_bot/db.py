@@ -41,6 +41,7 @@ class Database:
             schema_path = self.schema_path.with_name("schema_postgres.sql")
             schema = schema_path.read_text(encoding="utf-8")
             await self._pg_connection.execute(schema)
+            await self._run_migrations()
             return
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,11 +53,27 @@ class Database:
         await self._connection.commit()
 
     async def _run_migrations(self) -> None:
-        if self.database_url:
-            return
         await self._ensure_column("systems", "roblox_gamepass_id", "TEXT")
+        await self._ensure_column("order_requests", "roblox_username", "TEXT")
+        await self._ensure_column("order_requests", "admin_reply", "TEXT")
 
     async def _ensure_column(self, table_name: str, column_name: str, column_sql: str) -> None:
+        if self.database_url:
+            row = await self.fetchone(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = ?
+                  AND column_name = ?
+                """,
+                (table_name, column_name),
+            )
+            if row is not None:
+                return
+            await self.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+            return
+
         rows = await self.fetchall(f"PRAGMA table_info({table_name})")
         if any(str(row["name"]) == column_name for row in rows):
             return

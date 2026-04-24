@@ -17,10 +17,14 @@ from sales_bot.web_admin import (
     system_edit_page,
 )
 from sales_bot.web_portal import (
+    account_payment_page,
     admin_admins_page,
     admin_dashboard_page,
     admin_gamepasses_page,
     admin_systems_page,
+    custom_order_detail_page,
+    custom_orders_list_page,
+    custom_orders_page,
     special_order_detail_page,
     special_orders_list_page,
     special_system_compose_page,
@@ -56,6 +60,8 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
     app.router.add_get("/admin", admin_dashboard_page)
     app.router.add_route("*", "/admin/admins", admin_admins_page)
+    app.router.add_get("/admin/custom-orders", custom_orders_list_page)
+    app.router.add_route("*", "/admin/custom-orders/{order_id:\\d+}", custom_order_detail_page)
     app.router.add_route("*", "/admin/systems", admin_systems_page)
     app.router.add_route("*", "/admin/gamepasses", admin_gamepasses_page)
     app.router.add_route("*", "/admin/special-systems", special_system_compose_page)
@@ -70,6 +76,8 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_route("*", "/admin/events/{event_id:\\d+}/edit", event_edit_page)
     app.router.add_route("*", "/admin/systems/{system_id:\\d+}/edit", system_edit_page)
     app.router.add_get("/special-system-images/{image_id:\\d+}", special_system_image_page)
+    app.router.add_route("*", "/account-payment", account_payment_page)
+    app.router.add_route("*", "/custom-orders", custom_orders_page)
     app.router.add_route("*", "/special-systems/{slug}", special_system_page)
     return app
 

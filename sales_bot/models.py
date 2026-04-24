@@ -222,8 +222,10 @@ class OrderRequestRecord:
     required_timeframe: str
     payment_method: str
     offered_price: str
+    roblox_username: str | None
     status: str
     owner_message_id: int | None
+    admin_reply: str | None
     submitted_at: str
     reviewed_at: str | None
     reviewed_by: int | None

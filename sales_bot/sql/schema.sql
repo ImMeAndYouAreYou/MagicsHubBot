@@ -177,8 +177,10 @@ CREATE TABLE IF NOT EXISTS order_requests (
     required_timeframe TEXT NOT NULL,
     payment_method TEXT NOT NULL,
     offered_price TEXT NOT NULL,
+    roblox_username TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     owner_message_id INTEGER,
+    admin_reply TEXT,
     submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     reviewed_at TEXT,
     reviewed_by INTEGER

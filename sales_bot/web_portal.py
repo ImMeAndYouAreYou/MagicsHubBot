@@ -17,6 +17,7 @@ from sales_bot.exceptions import (
     SalesBotError,
 )
 from sales_bot.models import (
+    OrderRequestRecord,
     RobloxGamePassRecord,
     RobloxLinkRecord,
     SpecialOrderRequestRecord,
@@ -71,6 +72,7 @@ td strong { color: var(--text); }
 .check-card { display: flex; flex-direction: column; gap: 10px; }
 .check-line { display: flex; gap: 10px; align-items: center; color: var(--text); }
 .check-line input { width: auto; }
+.warning-note { color: #ff8579; font-weight: 700; }
 .muted { color: var(--muted); }
 .mono { font-family: Consolas, "Cascadia Mono", monospace; }
 @media (max-width: 700px) {
@@ -86,6 +88,7 @@ ORDER_STATUS_LABELS = {
     "pending": "ממתינה",
     "accepted": "התקבלה",
     "rejected": "נדחתה",
+    "completed": "הושלמה",
 }
 
 
@@ -129,6 +132,7 @@ def _admin_shell(
             <div class="nav-links">
                 <a href="/admin">לוח ניהול</a>
                 <a href="/admin/admins">אדמינים</a>
+                <a href="/admin/custom-orders">הזמנות אישיות</a>
                 <a href="/admin/systems">מערכות</a>
                 <a href="/admin/gamepasses">גיימפאסים</a>
                 <a href="/admin/special-systems">מערכות מיוחדות</a>
@@ -153,6 +157,7 @@ def _public_shell(
     title: str,
     intro: str,
     login_path: str,
+    section_label: str = "מערכות מיוחדות",
     content: str,
 ) -> str:
     account_block = ""
@@ -173,7 +178,7 @@ def _public_shell(
     <div class="portal-root" dir="rtl">
         <div class="top-strip">
             <div>
-                <p class="eyebrow">מערכות מיוחדות</p>
+                <p class="eyebrow">{_escape(section_label)}</p>
                 <h1>{_escape(title)}</h1>
                 <p>{_escape(intro)}</p>
             </div>
@@ -336,8 +341,30 @@ def _payment_method_select_options(special_system: SpecialSystemRecord, selected
     return "\n".join(options)
 
 
+def _order_payment_method_select_options(order_service: Any, selected_key: str | None = None) -> str:
+    normalized = (selected_key or "").strip()
+    options = ['<option value="">בחר שיטת תשלום</option>']
+    for key, label in order_service.available_payment_methods():
+        selected = " selected" if normalized in {key, label} else ""
+        options.append(f'<option value="{_escape(key)}"{selected}>{_escape(label)}</option>')
+    return "\n".join(options)
+
+
+def _yes_no_select_options(selected_value: str | None = None) -> str:
+    normalized = (selected_value or "").strip().lower()
+    options = ['<option value="">בחר</option>']
+    for value, label in (("yes", "כן"), ("no", "לא")):
+        selected = " selected" if normalized == value else ""
+        options.append(f'<option value="{value}"{selected}>{label}</option>')
+    return "\n".join(options)
+
+
 def _special_system_url(bot: "SalesBot", special_system: SpecialSystemRecord) -> str:
     return f"{bot.settings.public_base_url}/special-systems/{special_system.slug}"
+
+
+def _custom_order_admin_url(bot: "SalesBot", order_id: int) -> str:
+    return f"{bot.settings.public_base_url}/admin/custom-orders/{order_id}"
 
 
 def _special_system_embed(special_system: SpecialSystemRecord) -> discord.Embed:
@@ -426,6 +453,23 @@ async def _owner_order_embed(
     return embed
 
 
+async def _owner_custom_order_embed(bot: "SalesBot", order: OrderRequestRecord) -> discord.Embed:
+    requester_label = await _discord_user_label(bot, order.user_id)
+    embed = discord.Embed(title="יש הזמנה אישית חדשה", color=discord.Color.gold())
+    embed.add_field(name="משתמש Discord", value=f"<@{order.user_id}>\n{requester_label}\n{order.user_id}", inline=False)
+    embed.add_field(name="מה אתה רוצה להזמין", value=order.requested_item, inline=False)
+    embed.add_field(name="תוך כמה זמן אתה צריך את זה", value=order.required_timeframe, inline=False)
+    embed.add_field(name="איך אתה משלם", value=order.payment_method, inline=False)
+    embed.add_field(name="כמה אתה מוכן לשלם", value=order.offered_price, inline=False)
+    embed.add_field(name="מה השם שלך ברובלוקס", value=order.roblox_username or "לא צוין", inline=False)
+    embed.add_field(name="סטטוס", value=ORDER_STATUS_LABELS.get(order.status, order.status), inline=False)
+    if order.admin_reply:
+        note_label = "סיבת דחייה" if order.status == "rejected" else "הודעת אדמין"
+        embed.add_field(name=note_label, value=order.admin_reply, inline=False)
+    embed.set_footer(text=f"הזמנה #{order.id}")
+    return embed
+
+
 async def _update_owner_order_message(
     bot: "SalesBot",
     special_system: SpecialSystemRecord,
@@ -449,6 +493,116 @@ async def _update_owner_order_message(
         await message.edit(content="עדכון סטטוס לבקשת מערכת מיוחדת", embed=embed, view=view)
     except discord.HTTPException:
         return
+
+
+async def _update_owner_custom_order_message(bot: "SalesBot", order: OrderRequestRecord) -> None:
+    if order.owner_message_id is None:
+        return
+    try:
+        owner = await bot.fetch_user(bot.settings.owner_user_id)
+        owner_dm = owner.dm_channel or await owner.create_dm()
+        message = await owner_dm.fetch_message(order.owner_message_id)
+        embed = await _owner_custom_order_embed(bot, order)
+        view = discord.ui.View()
+        view.add_item(
+            discord.ui.Button(
+                label="פתח את ההזמנה באתר",
+                style=discord.ButtonStyle.link,
+                url=_custom_order_admin_url(bot, order.id),
+            )
+        )
+        await message.edit(content="עדכון סטטוס להזמנה אישית", embed=embed, view=view)
+    except discord.HTTPException:
+        return
+
+
+async def _notify_custom_order_requester(
+    bot: "SalesBot",
+    order: OrderRequestRecord,
+    *,
+    admin_reply: str | None,
+) -> None:
+    try:
+        requester = await bot.fetch_user(order.user_id)
+    except discord.HTTPException:
+        return
+
+    if order.status == "accepted":
+        message = "ההזמנה האישית שלך התקבלה. הבעלים יחזור אליך בהמשך."
+    elif order.status == "rejected":
+        message = "ההזמנה האישית שלך נדחתה."
+    elif order.status == "completed":
+        message = "ההזמנה שלך הושלמה בהצלחה. נשמח מאוד שתשאיר הוכחה באמצעות הפקודה: '/Vouch'. זה יוערך מאוד."
+    else:
+        return
+
+    if admin_reply:
+        if order.status == "rejected":
+            message = f"{message}\n\nסיבה: {admin_reply}"
+        else:
+            message = f"{message}\n\n{admin_reply}"
+
+    try:
+        await requester.send(message)
+    except discord.HTTPException:
+        return
+
+
+async def _send_account_payment_submission_to_admins(
+    bot: "SalesBot",
+    *,
+    session: WebsiteSessionRecord,
+    roblox_username: str,
+    roblox_password: str,
+    profile_link: str | None,
+    profile_image: tuple[str, bytes, str | None] | None,
+    has_email: bool,
+    has_phone: bool,
+    phone_details: str | None,
+    has_two_factor: bool,
+    two_factor_details: str | None,
+) -> int:
+    admin_ids = list(dict.fromkeys(await bot.services.admins.list_admin_ids()))
+    sender_label = _session_label(session)
+    successful_deliveries = 0
+
+    for admin_id in admin_ids:
+        try:
+            admin_user = bot.get_user(admin_id) or await bot.fetch_user(admin_id)
+            admin_dm = admin_user.dm_channel or await admin_user.create_dm()
+        except discord.HTTPException:
+            continue
+
+        embed = discord.Embed(title="נשלח משתמש Roblox בתור תשלום", color=discord.Color.orange())
+        embed.add_field(name="שולח", value=f"{sender_label}\n{session.discord_user_id}", inline=False)
+        embed.add_field(name="השם של המשתמש רובלוקס", value=roblox_username, inline=False)
+        embed.add_field(name="סיסמא של המשתמש רובלוקס", value=roblox_password, inline=False)
+        embed.add_field(name="קישור לפרופיל", value=profile_link or "לא נשלח", inline=False)
+        embed.add_field(name="האם יש על המשתמש מייל", value="כן" if has_email else "לא", inline=True)
+        embed.add_field(name="האם יש מספר טלפון על המשתמש", value="כן" if has_phone else "לא", inline=True)
+        embed.add_field(name="האם יש אימות דו שלבי", value="כן" if has_two_factor else "לא", inline=True)
+        embed.add_field(name="פרטי מספר טלפון", value=phone_details or "לא נשלחו פרטים נוספים.", inline=False)
+        embed.add_field(name="פרטי אימות דו שלבי", value=two_factor_details or "לא נשלחו פרטים נוספים.", inline=False)
+        embed.set_footer(text="המשתמש אישר שכל הפרטים נכונים ושהחשבון לא יחזור אליו לאחר מכן.")
+
+        send_kwargs: dict[str, Any] = {"embed": embed}
+        if profile_link:
+            view = discord.ui.View()
+            view.add_item(discord.ui.Button(label="פתח את הפרופיל", style=discord.ButtonStyle.link, url=profile_link))
+            send_kwargs["view"] = view
+        if profile_image is not None:
+            image_name, image_bytes, _content_type = profile_image
+            safe_name = image_name or "profile-image"
+            send_kwargs["file"] = discord.File(BytesIO(image_bytes), filename=safe_name)
+            embed.set_image(url=f"attachment://{safe_name}")
+
+        try:
+            await admin_dm.send(**send_kwargs)
+            successful_deliveries += 1
+        except discord.HTTPException:
+            continue
+
+    return successful_deliveries
 
 
 async def _send_special_system_message(bot: "SalesBot", special_system: SpecialSystemRecord) -> discord.Message:
@@ -558,6 +712,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         bot, session = await _require_admin_session(request)
         admin_ids = await bot.services.admins.list_admin_ids()
         systems = await bot.services.systems.list_systems()
+        pending_custom_orders = await bot.services.orders.list_requests(statuses=("pending",))
         special_systems = await bot.services.special_systems.list_special_systems(active_only=True)
         rollable_events = await bot.services.events.list_rollable_events()
         pending_special_orders = await bot.services.special_systems.list_order_requests(statuses=("pending",))
@@ -565,6 +720,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         <div class="stat-grid">
             <div class="card"><h2>אדמינים</h2><div class="stat-value">{len(admin_ids)}</div></div>
             <div class="card"><h2>מערכות</h2><div class="stat-value">{len(systems)}</div></div>
+            <div class="card"><h2>הזמנות אישיות ממתינות</h2><div class="stat-value">{len(pending_custom_orders)}</div></div>
             <div class="card"><h2>מערכות מיוחדות</h2><div class="stat-value">{len(special_systems)}</div></div>
             <div class="card"><h2>אירועים פתוחים</h2><div class="stat-value">{len(rollable_events)}</div></div>
             <div class="card"><h2>בקשות ממתינות</h2><div class="stat-value">{len(pending_special_orders)}</div></div>
@@ -573,6 +729,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         quick_links = """
         <div class="hero-grid">
             <div class="card"><h3>ניהול אדמינים</h3><p>הוספה והסרה של צוות הניהול מתוך האתר.</p><div class="actions"><a class="link-button" href="/admin/admins">פתח</a></div></div>
+            <div class="card"><h3>הזמנות אישיות</h3><p>רשימת כל ההזמנות האישיות, צפייה בפרטים, אישור, דחייה וסימון כהושלמה.</p><div class="actions"><a class="link-button" href="/admin/custom-orders">פתח</a></div></div>
             <div class="card"><h3>מערכות רגילות</h3><p>יצירת מערכות, עריכה, מחיקה ומתן או הסרה לפי User ID.</p><div class="actions"><a class="link-button" href="/admin/systems">פתח</a></div></div>
             <div class="card"><h3>גיימפאסים</h3><p>יצירה, עדכון, קישור ושליחה של גיימפאסים ישירות מתוך האתר.</p><div class="actions"><a class="link-button" href="/admin/gamepasses">פתח</a></div></div>
             <div class="card"><h3>מערכות מיוחדות</h3><p>פרסום מערכת מיוחדת עם כפתור קניה, תמונות, מחירים ושיטות תשלום.</p><div class="actions"><a class="link-button" href="/admin/special-systems">פתח</a></div></div>
@@ -1220,6 +1377,131 @@ async def special_order_detail_page(request: web.Request) -> web.Response:
         return _error_response("פרטי בקשה מיוחדת", str(exc), status=400)
 
 
+async def custom_orders_list_page(request: web.Request) -> web.Response:
+    try:
+        bot, session = await _require_admin_session(request)
+        status_filter = str(request.query.get("status", "all")).strip().lower()
+        statuses = None if status_filter == "all" else (status_filter,)
+        orders = await bot.services.orders.list_requests(statuses=statuses)
+        requester_labels = await asyncio.gather(*(_discord_user_label(bot, order.user_id) for order in orders)) if orders else []
+        rows = "\n".join(
+            f"""
+            <tr>
+                <td><strong>#{order.id}</strong></td>
+                <td>{_escape(requester_label)}<br><span class="mono">{order.user_id}</span></td>
+                <td><strong>{_escape(order.requested_item)}</strong><br><span class="muted">{_escape(order.required_timeframe)}</span></td>
+                <td>{_escape(order.payment_method)}<br>{_escape(order.offered_price)}</td>
+                <td>{_escape(order.roblox_username or 'לא צוין')}</td>
+                <td>{_status_badge(order.status)}</td>
+                <td><a class="link-button ghost-button" href="/admin/custom-orders/{order.id}">פתח</a></td>
+            </tr>
+            """
+            for order, requester_label in zip(orders, requester_labels)
+        )
+        if not rows:
+            rows = '<tr><td colspan="7">אין כרגע הזמנות שתואמות למסנן שבחרת.</td></tr>'
+        content = f"""
+        <div class="actions"><a class="link-button ghost-button" href="/admin/custom-orders?status=all">הכל</a><a class="link-button ghost-button" href="/admin/custom-orders?status=pending">ממתינות</a><a class="link-button ghost-button" href="/admin/custom-orders?status=accepted">התקבלו</a><a class="link-button ghost-button" href="/admin/custom-orders?status=completed">הושלמו</a><a class="link-button ghost-button" href="/admin/custom-orders?status=rejected">נדחו</a></div>
+        <div class="table-wrap"><table><thead><tr><th>#</th><th>לקוח</th><th>מה הוזמן</th><th>תשלום</th><th>Roblox</th><th>סטטוס</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>
+        """
+        body = _admin_shell(session, title="הזמנות אישיות", intro="ריכוז כל ההזמנות האישיות שנשלחו דרך דף האתר החדש.", content=content)
+        return _page_response("הזמנות אישיות", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("הזמנות אישיות", str(exc), status=400)
+
+
+async def custom_order_detail_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    try:
+        bot, session = await _require_admin_session(request)
+        order_id = int(request.match_info["order_id"])
+        order = await bot.services.orders.get_request(order_id)
+
+        if request.method == "POST" and order.status not in {"rejected", "completed"}:
+            form = await request.post()
+            action = str(form.get("action", "")).strip().lower()
+            if action not in {"accept", "reject", "complete"}:
+                raise PermissionDeniedError("הפעולה שנבחרה להזמנה האישית לא תקינה.")
+            if order.status == "pending" and action == "complete":
+                raise PermissionDeniedError("אפשר לסמן כהושלמה רק הזמנה שכבר התקבלה.")
+
+            admin_reply = str(form.get("admin_reply", "")).strip() or None
+            target_status = {
+                "accept": "accepted",
+                "reject": "rejected",
+                "complete": "completed",
+            }[action]
+            order = await bot.services.orders.resolve_request(
+                order.id,
+                reviewer_id=session.discord_user_id,
+                status=target_status,
+                admin_reply=admin_reply,
+            )
+            await _notify_custom_order_requester(bot, order, admin_reply=admin_reply)
+            await _update_owner_custom_order_message(bot, order)
+            notice = {
+                "accept": "ההזמנה התקבלה והלקוח קיבל עדכון ב-DM אם היה אפשר לשלוח.",
+                "reject": "ההזמנה נדחתה והלקוח קיבל את הסיבה ב-DM אם היה אפשר לשלוח.",
+                "complete": "ההזמנה סומנה כהושלמה והלקוח קיבל עדכון ב-DM אם היה אפשר לשלוח.",
+            }[action]
+
+        requester_label = await _discord_user_label(bot, order.user_id)
+        reviewer_label = await _discord_user_label(bot, order.reviewed_by) if order.reviewed_by is not None else None
+        admin_note_label = ""
+        if order.admin_reply:
+            admin_note_label = "סיבת דחייה" if order.status == "rejected" else "הודעת אדמין"
+
+        buttons_html = ""
+        if order.status == "pending":
+            buttons_html = '<button type="submit" name="action" value="accept">אשר הזמנה</button><button type="submit" name="action" value="reject" class="ghost-button danger">דחה הזמנה</button>'
+        elif order.status == "accepted":
+            buttons_html = '<button type="submit" name="action" value="complete">סמן כהושלמה</button><button type="submit" name="action" value="reject" class="ghost-button danger">דחה הזמנה</button>'
+
+        review_meta = ""
+        if order.reviewed_at:
+            review_meta = f'<div class="price-item"><strong>טופלה בתאריך</strong><span>{_escape(order.reviewed_at)}</span></div>'
+        if reviewer_label is not None:
+            review_meta += f'<div class="price-item"><strong>טופלה על ידי</strong><span>{_escape(reviewer_label)}<br><span class="mono">{order.reviewed_by}</span></span></div>'
+        if order.admin_reply and admin_note_label:
+            review_meta += f'<div class="price-item"><strong>{_escape(admin_note_label)}</strong><span>{_escape(order.admin_reply)}</span></div>'
+
+        content = f"""
+        {_notice_html(notice, success=success)}
+        <div class="split-grid">
+            <div class="card stack">
+                <div><h2>פרטי ההזמנה</h2></div>
+                <div class="price-list">
+                    <div class="price-item"><strong>סטטוס</strong><span>{_status_badge(order.status)}</span></div>
+                    <div class="price-item"><strong>Discord</strong><span>{_escape(requester_label)}<br><span class="mono">{order.user_id}</span></span></div>
+                    <div class="price-item"><strong>מה הוזמן</strong><span>{_escape(order.requested_item)}</span></div>
+                    <div class="price-item"><strong>דדליין שביקש הלקוח</strong><span>{_escape(order.required_timeframe)}</span></div>
+                    <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(order.payment_method)}</span></div>
+                    <div class="price-item"><strong>הצעת מחיר / תמורה</strong><span>{_escape(order.offered_price)}</span></div>
+                    <div class="price-item"><strong>שם Roblox</strong><span>{_escape(order.roblox_username or 'לא צוין')}</span></div>
+                    <div class="price-item"><strong>נשלח בתאריך</strong><span>{_escape(order.submitted_at)}</span></div>
+                    {review_meta}
+                </div>
+            </div>
+            <div class="card">
+                <h2>טיפול בהזמנה</h2>
+                <form method="post">
+                    <div class="grid"><label class="field field-wide"><span>הודעה ללקוח</span><textarea name="admin_reply" placeholder="הודעה שתישלח ללקוח אם תאשר, תדחה או תסמן כהושלמה.">{_escape(order.admin_reply or '')}</textarea></label></div>
+                    <div class="actions">{buttons_html}<a class="link-button ghost-button" href="/admin/custom-orders">חזרה לרשימה</a></div>
+                </form>
+            </div>
+        </div>
+        """
+        body = _admin_shell(session, title=f"הזמנה אישית #{order.id}", intro="בדיקה, אישור, דחייה או סיום של הזמנה אישית שנשלחה מהאתר.", content=content)
+        return _page_response(f"הזמנה אישית #{order.id}", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("פרטי הזמנה אישית", str(exc), status=400)
+
+
 async def special_system_image_page(request: web.Request) -> web.Response:
     bot: SalesBot = request.app["bot"]
     try:
@@ -1227,6 +1509,266 @@ async def special_system_image_page(request: web.Request) -> web.Response:
         return web.Response(body=image.asset_bytes, content_type=image.content_type or "application/octet-stream")
     except SalesBotError as exc:
         return _error_response("תמונת מערכת מיוחדת", str(exc), status=404)
+
+
+async def custom_orders_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    requested_item = ""
+    required_timeframe = ""
+    selected_payment_method = ""
+    offered_price = ""
+    roblox_username = ""
+    try:
+        bot_ref, session = await _current_site_session(request)
+        bot = bot_ref
+
+        if request.method == "POST":
+            try:
+                bot, session = await _require_site_session(request)
+                form = await request.post()
+                requested_item = str(form.get("requested_item", "")).strip()
+                required_timeframe = str(form.get("required_timeframe", "")).strip()
+                selected_payment_method = str(form.get("payment_method", "")).strip()
+                offered_price = str(form.get("offered_price", "")).strip()
+                roblox_username = str(form.get("roblox_username", "")).strip()
+                if not requested_item or not required_timeframe or not selected_payment_method or not offered_price or not roblox_username:
+                    raise PermissionDeniedError("חובה למלא את כל השדות בטופס ההזמנה.")
+
+                order = await bot.services.orders.create_request(
+                    user_id=session.discord_user_id,
+                    requested_item=requested_item,
+                    required_timeframe=required_timeframe,
+                    payment_method=selected_payment_method,
+                    offered_price=offered_price,
+                    roblox_username=roblox_username,
+                )
+
+                try:
+                    owner = await bot.fetch_user(bot.settings.owner_user_id)
+                    owner_dm = owner.dm_channel or await owner.create_dm()
+                    owner_embed = await _owner_custom_order_embed(bot, order)
+                    view = discord.ui.View()
+                    view.add_item(
+                        discord.ui.Button(
+                            label="פתח את ההזמנה באתר",
+                            style=discord.ButtonStyle.link,
+                            url=_custom_order_admin_url(bot, order.id),
+                        )
+                    )
+                    owner_message = await owner_dm.send(content="יש הזמנה אישית חדשה", embed=owner_embed, view=view)
+                except discord.HTTPException as exc:
+                    raise ExternalServiceError("לא הצלחתי לשלוח את ההזמנה לבעלים ב-DM.") from exc
+                await bot.services.orders.set_owner_message(order.id, owner_message.id)
+
+                success_html = """
+                <div class="card stack">
+                    <div><h2>ההזמנה נשלחה</h2><p>שלחנו לבעלים את כל הפרטים, וההזמנה מחכה עכשיו ברשימת האדמין באתר.</p></div>
+                    <div class="actions"><a class="link-button" href="/custom-orders">שלח הזמנה נוספת</a></div>
+                </div>
+                """
+                body = _public_shell(
+                    session,
+                    title="הזמנה אישית",
+                    intro="ההזמנה שלך נשמרה ונשלחה לבעלים.",
+                    login_path="/custom-orders",
+                    section_label="הזמנות אישיות",
+                    content=_notice_html("ההזמנה נשלחה בהצלחה. נחזור אליך ב-DM אחרי שנבדוק אותה.", success=True) + success_html,
+                )
+                return _page_response("הזמנה אישית", body)
+            except SalesBotError as exc:
+                notice = str(exc)
+                success = False
+                bot_ref, session = await _current_site_session(request)
+                bot = bot_ref
+
+        payment_methods_html = ''.join(
+            f'<div class="price-item"><strong>{_escape(label)}</strong><span>אפשר לבחור בטופס</span></div>'
+            for _key, label in bot.services.orders.available_payment_methods()
+        )
+        connected_account_html = ''
+        if session is not None:
+            connected_account_html = f'<div class="meta-card"><p><strong>חשבון Discord מחובר:</strong> {_escape(_session_label(session))}</p></div>'
+        content = f"""
+        {_notice_html(notice, success=success)}
+        <div class="split-grid">
+            <div class="card stack">
+                <div><h2>מה מקבלים בדף הזה</h2><p>אפשר לשלוח הזמנה אישית בלי לחבר חשבון Roblox ל-Discord. כל מה שצריך הוא להתחבר עם Discord ולמלא את הפרטים.</p></div>
+                <div><h3>שיטות תשלום זמינות</h3><div class="price-list">{payment_methods_html}</div></div>
+            </div>
+            <div class="card">
+                <h2>טופס הזמנה אישית</h2>
+                <p class="muted">כל השדות חובה. שם ה-Discord שלך נלקח אוטומטית מההתחברות לאתר.</p>
+                {connected_account_html}
+                <form method="post">
+                    <div class="grid">
+                        <label class="field field-wide"><span>מה אתה רוצה להזמין</span><textarea name="requested_item" required>{_escape(requested_item)}</textarea></label>
+                        <label class="field"><span>תוך כמה זמן אתה צריך את זה</span><input type="text" name="required_timeframe" value="{_escape(required_timeframe)}" required></label>
+                        <label class="field"><span>איך אתה משלם</span><select name="payment_method" required>{_order_payment_method_select_options(bot.services.orders, selected_payment_method)}</select></label>
+                        <label class="field field-wide"><span>כמה אתה מוכן לשלם (או מה אתה מביא אם זה דברים במשחק)</span><textarea name="offered_price" required>{_escape(offered_price)}</textarea></label>
+                        <label class="field"><span>מה השם שלך ברובלוקס</span><input type="text" name="roblox_username" value="{_escape(roblox_username)}" required></label>
+                    </div>
+                    <div class="actions"><button type="submit">שלח הזמנה</button></div>
+                </form>
+            </div>
+        </div>
+        """
+        body = _public_shell(
+            session,
+            title="הזמנה אישית",
+            intro="שלח כאן הזמנה אישית חדשה במקום הטופס הישן של Discord.",
+            login_path="/custom-orders",
+            section_label="הזמנות אישיות",
+            content=content,
+        )
+        return _page_response("הזמנה אישית", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("הזמנה אישית", str(exc), status=400)
+
+
+async def account_payment_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    roblox_username = ""
+    roblox_password = ""
+    profile_link = ""
+    has_email = ""
+    has_phone = ""
+    phone_details = ""
+    has_two_factor = ""
+    two_factor_details = ""
+    confirmed = False
+    try:
+        bot_ref, session = await _current_site_session(request)
+        bot = bot_ref
+
+        if request.method == "POST":
+            try:
+                bot, session = await _require_site_session(request)
+                form = await request.post()
+                roblox_username = str(form.get("roblox_username", "")).strip()
+                roblox_password = str(form.get("roblox_password", "")).strip()
+                profile_link = str(form.get("profile_link", "")).strip()
+                has_email = str(form.get("has_email", "")).strip().lower()
+                has_phone = str(form.get("has_phone", "")).strip().lower()
+                phone_details = str(form.get("phone_details", "")).strip()
+                has_two_factor = str(form.get("has_two_factor", "")).strip().lower()
+                two_factor_details = str(form.get("two_factor_details", "")).strip()
+                confirmed = str(form.get("confirmed", "")).strip().lower() in {"1", "true", "yes", "on"}
+                profile_image = _extract_file_upload(form.get("profile_image"), image_only=True)
+
+                if not roblox_username or not roblox_password or not has_email or not has_phone or not has_two_factor:
+                    raise PermissionDeniedError("חובה למלא את כל שדות החובה בטופס הזה.")
+                if has_phone == "yes" and not phone_details:
+                    raise PermissionDeniedError("אם יש מספר טלפון על המשתמש, חובה לכתוב פרטים מתחת לשדה הזה.")
+                if has_two_factor == "yes" and not two_factor_details:
+                    raise PermissionDeniedError("אם יש אימות דו שלבי על המשתמש, חובה לכתוב פרטים מתחת לשדה הזה.")
+                if not confirmed:
+                    raise PermissionDeniedError("חובה לאשר שאתה מבין שאין החזרות ושכל הפרטים נכונים.")
+
+                delivered_count = await _send_account_payment_submission_to_admins(
+                    bot,
+                    session=session,
+                    roblox_username=roblox_username,
+                    roblox_password=roblox_password,
+                    profile_link=profile_link or None,
+                    profile_image=profile_image,
+                    has_email=has_email == "yes",
+                    has_phone=has_phone == "yes",
+                    phone_details=phone_details or None,
+                    has_two_factor=has_two_factor == "yes",
+                    two_factor_details=two_factor_details or None,
+                )
+                if delivered_count <= 0:
+                    raise ExternalServiceError("לא הצלחתי להעביר את פרטי המשתמש לאף אדמין ב-DM. נסה שוב בעוד רגע.")
+
+                success_html = """
+                <div class="card stack">
+                    <div><h2>הטופס נשלח</h2><p>הפרטים הועברו לאדמינים בהצלחה. אחרי האימות המלא וההגעה של המשתמש ליוצרים, תקבלו את מה שסוכם.</p></div>
+                    <div class="actions"><a class="link-button" href="/account-payment">שלח טופס נוסף</a></div>
+                </div>
+                """
+                body = _public_shell(
+                    session,
+                    title="שליחת משתמש בתור תשלום",
+                    intro="הטופס נשלח לאדמינים בהצלחה.",
+                    login_path="/account-payment",
+                    section_label="תשלום במשתמש Roblox",
+                    content=_notice_html("הטופס נשלח בהצלחה לאדמינים.", success=True) + success_html,
+                )
+                return _page_response("שליחת משתמש בתור תשלום", body)
+            except SalesBotError as exc:
+                notice = str(exc)
+                success = False
+                bot_ref, session = await _current_site_session(request)
+                bot = bot_ref
+
+        connected_account_html = ""
+        if session is not None:
+            connected_account_html = f'<div class="meta-card"><p><strong>חשבון Discord מחובר:</strong> {_escape(_session_label(session))}</p></div>'
+
+        content = f"""
+        {_notice_html(notice, success=success)}
+        <div class="split-grid">
+            <div class="card stack">
+                <div>
+                    <h2>לפני שליחת הטופס</h2>
+                    <p class="warning-note"><strong>הדף הזה הוא דף שליחת משתמש בתור תשלום. יש כמה דברים חשובים שתצטרך לדעת ובעת שליחת הטופס אתה מסכים להם</strong></p>
+                    <p class="warning-note"><strong>אתה שולח כאן את הפרטים של המשתמש רובלוקס שאתה רוצה לתת לנו בתור תשלום</strong></p>
+                    <p class="warning-note"><strong>אתה נותן את הסיסמא שלך למשתמש שאתה רוצה לתת לנו בתור תשלום</strong></p>
+                    <p class="warning-note"><strong>אתה מסכים לכך שאין החזרות ורק לאחר האימות המלא וההגעה של המשתמש ליוצרים אתה תקבל את מה שהזמנת</strong></p>
+                </div>
+            </div>
+            <div class="card">
+                <h2>טופס שליחת משתמש</h2>
+                <p class="muted">הטופס הזה דורש התחברות עם Discord כדי שנדע מי שלח את הפרטים.</p>
+                {connected_account_html}
+                <form method="post" enctype="multipart/form-data">
+                    <div class="grid">
+                        <label class="field"><span>השם של המשתמש רובלוקס (שם!!!! לא כינוי!!!!)</span><input type="text" name="roblox_username" value="{_escape(roblox_username)}" required></label>
+                        <label class="field"><span>סיסמא של המשתמש רובלוקס</span><input type="text" name="roblox_password" value="{_escape(roblox_password)}" required></label>
+                        <label class="field field-wide"><span>קישור לפרופיל ברובלוקס במידה ואתה יכול לשלוח</span><input type="url" name="profile_link" value="{_escape(profile_link)}"></label>
+                        <label class="field field-wide"><span>תמונה של הפרופיל במידה ואתה יכול להוסיף</span><input type="file" name="profile_image" accept="image/*"></label>
+                        <label class="field"><span>האם יש על המשתמש מייל שלך</span><select name="has_email" required>{_yes_no_select_options(has_email)}</select></label>
+                        <div class="field field-wide">
+                            <span>האם יש מספר טלפון על המשתמש</span>
+                            <select name="has_phone" required>{_yes_no_select_options(has_phone)}</select>
+                            <input type="text" name="phone_details" placeholder="במידה וכן, כתוב כאן את הפרטים הרלוונטיים" value="{_escape(phone_details)}">
+                            <p class="warning-note"><strong>מומלץ להוריד את המספר טלפון מהמשתמש לפני שתשלח את זה</strong></p>
+                        </div>
+                        <div class="field field-wide">
+                            <span>האם יש אימות דו שלבי על המשתמש</span>
+                            <select name="has_two_factor" required>{_yes_no_select_options(has_two_factor)}</select>
+                            <textarea name="two_factor_details" placeholder="במידה וכן, כתוב כאן את כל הפרטים הרלוונטיים">{_escape(two_factor_details)}</textarea>
+                            <p class="warning-note"><strong>אנא תוריד את האימות דו שלבי לפני שתשלח את המשתמש</strong></p>
+                        </div>
+                        <label class="meta-card check-card field-wide">
+                            <span class="check-line warning-note">
+                                <input type="checkbox" name="confirmed" value="true"{' checked' if confirmed else ''} required>
+                                <strong>האם אתה מבין שאתה מביא לנו את המשתמש הזה והוא לא יחזור אלייך אחר כך, ובנוסף לכך אתה מאשר בכך שהבאת פרטים נכונים ולא זייפת אף פרט? (במידה ותזייף פרטים אתה תקבל בלאקליסט מהמשחק והשרת שלנו)</strong>
+                            </span>
+                        </label>
+                    </div>
+                    <div class="actions"><button type="submit">שלח את המשתמש לאדמינים</button></div>
+                </form>
+            </div>
+        </div>
+        """
+        body = _public_shell(
+            session,
+            title="שליחת משתמש בתור תשלום",
+            intro="שלח כאן את פרטי המשתמש שאתה מביא כתשלום, אחרי התחברות עם Discord.",
+            login_path="/account-payment",
+            section_label="תשלום במשתמש Roblox",
+            content=content,
+        )
+        return _page_response("שליחת משתמש בתור תשלום", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("שליחת משתמש בתור תשלום", str(exc), status=400)
 
 
 async def special_system_page(request: web.Request) -> web.Response:

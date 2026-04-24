@@ -59,6 +59,17 @@ class AdminCog(commands.Cog):
     def __init__(self, bot: SalesBot) -> None:
         self.bot = bot
 
+    @staticmethod
+    async def _resolve_messageable_channel(
+        interaction: discord.Interaction,
+    ) -> discord.abc.Messageable:
+        channel = interaction.channel
+        if channel is None:
+            raise app_commands.AppCommandError("לא הצלחתי לזהות את הערוץ הנוכחי.")
+        if not isinstance(channel, discord.abc.Messageable):
+            raise app_commands.AppCommandError("הערוץ הזה לא תומך בשליחת הודעות.")
+        return channel
+
     async def _resolve_system_value(self, system_value: str) -> SystemRecord:
         value = system_value.strip()
         if not value:
@@ -126,6 +137,39 @@ class AdminCog(commands.Cog):
             view=view,
             ephemeral=True,
         )
+
+    @app_commands.command(name="bit", description="שליחת קישור התשלום של Bit לערוץ הנוכחי.")
+    @admin_only()
+    async def bit(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        channel = await self._resolve_messageable_channel(interaction)
+        await channel.send("https://www.bitpay.co.il/app/me/D862597B-603F-4BB0-9F17-A8902FCB4DE1")
+        await interaction.followup.send("קישור ה-Bit נשלח לערוץ הזה.", ephemeral=True)
+
+    @app_commands.command(name="sendaccount", description="שליחת פאנל ציבורי לדף תשלום דרך משתמש Roblox.")
+    @admin_only()
+    async def sendaccount(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        channel = await self._resolve_messageable_channel(interaction)
+        view = discord.ui.View()
+        view.add_item(
+            discord.ui.Button(
+                label="שלח משתמש לתשלום",
+                style=discord.ButtonStyle.link,
+                url=f"{self.bot.settings.public_base_url}/account-payment",
+            )
+        )
+        embed = discord.Embed(
+            title="שליחת משתמש Roblox בתור תשלום",
+            description="אם סוכם איתכם לשלם דרך משתמש Roblox, לחצו על הכפתור כדי לעבור לטופס המאובטח באתר ולשלוח את כל הפרטים לאדמינים.",
+            color=discord.Color.orange(),
+        )
+        await channel.send(embed=embed, view=view)
+        await interaction.followup.send("פאנל שליחת המשתמש נשלח לערוץ הזה.", ephemeral=True)
 
     @app_commands.command(name="discount", description="שמירת הנחה למשתמש על מערכת קיימת.")
     @app_commands.describe(

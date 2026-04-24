@@ -5,7 +5,7 @@ from typing import Any
 
 import discord
 
-from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
+from sales_bot.exceptions import ExternalServiceError
 from sales_bot.models import OrderRequestRecord
 from sales_bot.ui.common import RestrictedView
 from sales_bot.ui.common import defer_interaction_response, edit_interaction_response
@@ -17,6 +17,7 @@ class OrderDraft:
     required_timeframe: str
     payment_method: str
     offered_price: str
+    roblox_username: str
 
 
 ORDER_STATUS_LABELS = {
@@ -33,6 +34,7 @@ def draft_from_order(order: OrderRequestRecord) -> OrderDraft:
         required_timeframe=order.required_timeframe,
         payment_method=order.payment_method,
         offered_price=order.offered_price,
+        roblox_username=order.roblox_username or "",
     )
 
 
@@ -44,6 +46,7 @@ def build_order_embed(title: str, draft: OrderDraft, *, user: discord.abc.User |
     embed.add_field(name="תוך כמה זמן אתה צריך את זה", value=draft.required_timeframe, inline=False)
     embed.add_field(name="איך אתה משלם", value=draft.payment_method, inline=False)
     embed.add_field(name="כמה אתה מוכן לשלם", value=draft.offered_price, inline=False)
+    embed.add_field(name="מה השם שלך ברובלוקס", value=draft.roblox_username or "לא צוין", inline=False)
     return embed
 
 
@@ -64,10 +67,16 @@ def build_order_record_embed(
 ) -> discord.Embed:
     embed = build_order_embed(title, draft_from_order(order), user=user)
     _upsert_embed_field(embed, name="סטטוס", value=ORDER_STATUS_LABELS.get(order.status, order.status))
-    if rejection_reason:
-        _upsert_embed_field(embed, name="סיבת דחייה", value=rejection_reason)
+    admin_note = rejection_reason if rejection_reason is not None else order.admin_reply
+    if admin_note:
+        note_label = "סיבת דחייה" if order.status == "rejected" or rejection_reason is not None else "הודעת אדמין"
+        _upsert_embed_field(embed, name=note_label, value=admin_note)
     embed.set_footer(text=f"מספר הזמנה: {order.id}")
     return embed
+
+
+def custom_order_page_url(bot: discord.Client) -> str:
+    return f"{bot.settings.public_base_url.rstrip('/')}/custom-orders"
 
 
 class OrderModal(discord.ui.Modal):
@@ -98,26 +107,25 @@ class OrderModal(discord.ui.Modal):
             max_length=100,
             default=draft.offered_price if draft else None,
         )
+        self.roblox_username_input = discord.ui.TextInput(
+            label="מה השם שלך ברובלוקס",
+            style=discord.TextStyle.short,
+            max_length=100,
+            default=draft.roblox_username if draft else None,
+        )
         self.add_item(self.requested_item_input)
         self.add_item(self.required_timeframe_input)
         self.add_item(self.payment_method_input)
         self.add_item(self.offered_price_input)
+        self.add_item(self.roblox_username_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        try:
-            await self.bot.services.oauth.get_link(interaction.user.id)
-        except NotFoundError:
-            await interaction.response.send_message(
-                "כדי לפתוח הזמנה אישית צריך קודם לקשר את חשבון הרובלוקס שלך עם `/link`.",
-                ephemeral=True,
-            )
-            return
-
         draft = OrderDraft(
             requested_item=str(self.requested_item_input),
             required_timeframe=str(self.required_timeframe_input),
             payment_method=str(self.payment_method_input),
             offered_price=str(self.offered_price_input),
+            roblox_username=str(self.roblox_username_input),
         )
         view = OrderPreviewView(self.bot, actor_id=interaction.user.id, draft=draft)
         embed = build_order_embed("תצוגה מקדימה של ההזמנה", draft, user=interaction.user)
@@ -141,15 +149,23 @@ class OrderPanelView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button[Any],
     ) -> None:
-        try:
-            await interaction.response.send_modal(OrderModal(self.bot))
-        except discord.HTTPException as exc:
-            if exc.code != 40060:
-                raise
-            await interaction.followup.send(
-                "הבקשה נפתחה כבר. נסה ללחוץ שוב על הכפתור אם חלון ההזמנה לא הופיע.",
-                ephemeral=True,
+        await interaction.response.send_message(
+            "טופס ההזמנה האישית עבר לאתר. פתח את הדף, התחבר עם Discord אם צריך, ושלח שם את ההזמנה.",
+            view=OrderPanelWebsiteView(self.bot),
+            ephemeral=True,
+        )
+
+
+class OrderPanelWebsiteView(discord.ui.View):
+    def __init__(self, bot: discord.Client) -> None:
+        super().__init__(timeout=None)
+        self.add_item(
+            discord.ui.Button(
+                label="הזמן",
+                style=discord.ButtonStyle.link,
+                url=custom_order_page_url(bot),
             )
+        )
 
 
 class OrderPreviewView(RestrictedView):
@@ -181,12 +197,12 @@ class OrderPreviewView(RestrictedView):
             required_timeframe=self.draft.required_timeframe,
             payment_method=self.draft.payment_method,
             offered_price=self.draft.offered_price,
+            roblox_username=self.draft.roblox_username,
         )
 
         owner = await self.bot.fetch_user(self.bot.settings.owner_user_id)
         owner_dm = owner.dm_channel or await owner.create_dm()
-        owner_embed = build_order_embed("הזמנה חדשה בהכנה אישית", self.draft, user=interaction.user)
-        owner_embed.set_footer(text=f"מספר הזמנה: {order.id}")
+        owner_embed = build_order_record_embed("הזמנה חדשה בהכנה אישית", order, user=interaction.user)
         decision_view = OrderDecisionView(self.bot, order.id, interaction.user.id)
 
         try:
@@ -264,6 +280,7 @@ class OrderDecisionView(RestrictedView):
                         required_timeframe=order.required_timeframe,
                         payment_method=order.payment_method,
                         offered_price=order.offered_price,
+                        roblox_username=order.roblox_username or "",
                     ),
                 )
                 rejected_embed.color = discord.Color.red()
@@ -440,6 +457,7 @@ class OrderRejectPreviewView(RestrictedView):
             self.order.id,
             reviewer_id=interaction.user.id,
             status="rejected",
+            admin_reply=self.reason,
         )
         self.management_view.order = updated_order
 

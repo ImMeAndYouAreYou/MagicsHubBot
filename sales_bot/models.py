@@ -85,6 +85,17 @@ class DeliveryRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class SystemDiscountRecord:
+    user_id: int
+    system: SystemRecord
+    discount_percent: int
+    created_by: int | None
+    updated_by: int | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True, frozen=True)
 class VouchRecord:
     id: int
     admin_user_id: int
@@ -150,6 +161,60 @@ class RobloxGamePassRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class SpecialSystemPaymentMethod:
+    key: str
+    label: str
+    price: str
+
+
+@dataclass(slots=True, frozen=True)
+class SpecialSystemRecord:
+    id: int
+    slug: str
+    title: str
+    description: str
+    payment_methods: tuple[SpecialSystemPaymentMethod, ...]
+    channel_id: int
+    message_id: int | None
+    created_by: int | None
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class SpecialSystemImageRecord:
+    id: int
+    special_system_id: int
+    asset_name: str
+    content_type: str | None
+    asset_bytes: bytes
+    sort_order: int
+    created_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class SpecialOrderRequestRecord:
+    id: int
+    special_system_id: int
+    user_id: int
+    discord_name: str
+    roblox_name: str
+    payment_method_key: str
+    payment_method_label: str
+    payment_price: str
+    linked_roblox_sub: str | None
+    linked_roblox_username: str | None
+    linked_roblox_display_name: str | None
+    status: str
+    owner_message_id: int | None
+    admin_reply: str | None
+    submitted_at: str
+    reviewed_at: str | None
+    reviewed_by: int | None
+
+
+@dataclass(slots=True, frozen=True)
 class OrderRequestRecord:
     id: int
     user_id: int
@@ -172,6 +237,18 @@ class AdminPanelSessionRecord:
     target_id: int | None
     expires_at: str
     created_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class WebsiteSessionRecord:
+    token: str
+    discord_user_id: int
+    username: str
+    global_name: str | None
+    avatar_hash: str | None
+    expires_at: str
+    created_at: str
+    last_seen_at: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -212,6 +289,27 @@ class GiveawayRecord:
     ends_at: str
     status: str
     result_json: str | None
+    created_by: int | None
+    created_at: str
+    updated_at: str
+    closed_at: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class EventRecord:
+    id: int
+    channel_id: int
+    message_id: int | None
+    title: str
+    description: str | None
+    reward: str
+    duration_value: int
+    duration_unit: str
+    ends_at: str
+    status: str
+    winner_user_id: int | None
+    winner_message_id: int | None
+    rolled_at: str | None
     created_by: int | None
     created_at: str
     updated_at: str

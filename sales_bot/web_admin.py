@@ -215,17 +215,24 @@ async def _authorize_panel_request(
 ) -> tuple["SalesBot", int]:
     bot: SalesBot = request.app["bot"]
     token = request.query.get("token", "").strip()
-    if not token:
-        raise PermissionDeniedError("חסר טוקן גישה לפאנל הניהול.")
+    if token:
+        session = await bot.services.panels.get_session(token, expected_panel_type=panel_type)
+        if target_id is None and session.target_id is not None:
+            raise PermissionDeniedError("קישור פאנל הניהול הזה שייך לרשומה אחרת.")
+        if target_id is not None and session.target_id != target_id:
+            raise PermissionDeniedError("קישור פאנל הניהול הזה לא תואם לרשומה שביקשת.")
+        if not await bot.services.admins.is_admin(session.admin_user_id):
+            raise PermissionDeniedError("קישור פאנל הניהול הזה כבר לא משויך לאדמין של הבוט.")
+        return bot, session.admin_user_id
 
-    session = await bot.services.panels.get_session(token, expected_panel_type=panel_type)
-    if target_id is None and session.target_id is not None:
-        raise PermissionDeniedError("קישור פאנל הניהול הזה שייך לרשומה אחרת.")
-    if target_id is not None and session.target_id != target_id:
-        raise PermissionDeniedError("קישור פאנל הניהול הזה לא תואם לרשומה שביקשת.")
-    if not await bot.services.admins.is_admin(session.admin_user_id):
-        raise PermissionDeniedError("קישור פאנל הניהול הזה כבר לא משויך לאדמין של הבוט.")
-    return bot, session.admin_user_id
+    website_token = request.cookies.get(bot.services.web_auth.cookie_name, "").strip()
+    if not website_token:
+        raise PermissionDeniedError("חסר טוקן גישה לפאנל הניהול או שלא בוצעה התחברות לאתר.")
+
+    website_session = await bot.services.web_auth.get_session(website_token)
+    if not await bot.services.admins.is_admin(website_session.discord_user_id):
+        raise PermissionDeniedError("רק אדמינים של הבוט יכולים לפתוח את פאנל הניהול הזה.")
+    return bot, website_session.discord_user_id
 
 
 async def _list_text_channels(bot: "SalesBot") -> list[discord.TextChannel]:
@@ -501,6 +508,90 @@ def _render_giveaway_form(
     """
 
 
+def _event_form_defaults() -> dict[str, Any]:
+    return {
+        "title": "",
+        "description": "",
+        "reward": "",
+        "channel_id": None,
+        "duration_value": 1,
+        "duration_unit": "hours",
+    }
+
+
+def _event_values_from_record(event: Any) -> dict[str, Any]:
+    return {
+        "title": event.title,
+        "description": event.description or "",
+        "reward": event.reward,
+        "channel_id": event.channel_id,
+        "duration_value": event.duration_value,
+        "duration_unit": event.duration_unit,
+    }
+
+
+def _extract_event_form_values(post_data: Any) -> dict[str, Any]:
+    return {
+        "title": str(post_data.get("title", "")),
+        "description": str(post_data.get("description", "")),
+        "reward": str(post_data.get("reward", "")),
+        "channel_id": int(str(post_data.get("channel_id", "0")) or 0),
+        "duration_value": int(str(post_data.get("duration_value", "0")) or 0),
+        "duration_unit": str(post_data.get("duration_unit", "hours")),
+    }
+
+
+def _render_event_form(
+    *,
+    mode_label: str,
+    channels: list[discord.TextChannel],
+    values: dict[str, Any],
+    error_text: str | None = None,
+) -> str:
+    error_html = f'<div class="notice">{_escape(error_text)}</div>' if error_text else ""
+    return f"""
+    <p class="eyebrow">פאנל אירועים</p>
+    <h1>{_escape(mode_label)} אירוע</h1>
+    <p>צרו או ערכו אירוע עם פרס, תיאור, ערוץ ומשך זמן. ההודעה תפורסם עם ריאקשן כוכב להשתתפות.</p>
+    {error_html}
+    <form method="post">
+        <div class="grid">
+            <label class="field field-wide">
+                <span>כותרת האירוע</span>
+                <input type="text" maxlength="180" name="title" value="{_escape(values['title'])}" required>
+            </label>
+            <label class="field field-wide">
+                <span>תיאור</span>
+                <textarea name="description">{_escape(values['description'])}</textarea>
+            </label>
+            <label class="field field-wide">
+                <span>פרס</span>
+                <input type="text" maxlength="220" name="reward" value="{_escape(values['reward'])}" required>
+            </label>
+            <label class="field">
+                <span>שלח לערוץ</span>
+                <select name="channel_id" required>
+                    {_render_channel_options(channels, values['channel_id'])}
+                </select>
+            </label>
+            <label class="field">
+                <span>משך זמן</span>
+                <input type="number" min="1" name="duration_value" value="{_escape(values['duration_value'])}" required>
+            </label>
+            <label class="field">
+                <span>יחידת זמן</span>
+                <select name="duration_unit" required>
+                    {_render_duration_unit_options(str(values['duration_unit']))}
+                </select>
+            </label>
+        </div>
+        <div class="actions">
+            <button type="submit">{_escape(mode_label)} אירוע</button>
+        </div>
+    </form>
+    """
+
+
 def _system_values_from_record(system: Any) -> dict[str, Any]:
     return {
         "name": system.name,
@@ -608,6 +699,18 @@ async def giveaway_edit_page(request: web.Request) -> web.Response:
         request,
         giveaway_id=int(request.match_info["giveaway_id"]),
         panel_type="giveaway-edit",
+    )
+
+
+async def event_create_page(request: web.Request) -> web.Response:
+    return await _handle_event_form(request, event_id=None, panel_type="event-create")
+
+
+async def event_edit_page(request: web.Request) -> web.Response:
+    return await _handle_event_form(
+        request,
+        event_id=int(request.match_info["event_id"]),
+        panel_type="event-edit",
     )
 
 
@@ -819,3 +922,82 @@ async def _handle_giveaway_form(
     except Exception:
         LOGGER.exception("Unexpected giveaway panel failure")
         return _error_response("פאנל הגרלות", "אירעה שגיאה לא צפויה בזמן טעינת פאנל ההגרלות.", status=500)
+
+
+async def _handle_event_form(
+    request: web.Request,
+    *,
+    event_id: int | None,
+    panel_type: str,
+) -> web.Response:
+    try:
+        bot, admin_user_id = await _authorize_panel_request(request, panel_type=panel_type, target_id=event_id)
+        channels = await _list_text_channels(bot)
+        values = _event_form_defaults()
+        if event_id is not None:
+            values = _event_values_from_record(await bot.services.events.get_editable_event(event_id))
+
+        if request.method == "POST":
+            form_data = await request.post()
+            values = _extract_event_form_values(form_data)
+            try:
+                if event_id is None:
+                    saved_event = await bot.services.events.create_event(
+                        bot,
+                        created_by=admin_user_id,
+                        channel_id=values["channel_id"],
+                        title=values["title"],
+                        description=values["description"],
+                        reward=values["reward"],
+                        duration_value=values["duration_value"],
+                        duration_unit=values["duration_unit"],
+                    )
+                    success_title = f"האירוע #{saved_event.id} נוצר"
+                    success_message = "האירוע פורסם בהצלחה."
+                else:
+                    saved_event = await bot.services.events.update_event(
+                        bot,
+                        event_id,
+                        channel_id=values["channel_id"],
+                        title=values["title"],
+                        description=values["description"],
+                        reward=values["reward"],
+                        duration_value=values["duration_value"],
+                        duration_unit=values["duration_unit"],
+                    )
+                    success_title = f"האירוע #{saved_event.id} עודכן"
+                    success_message = "הודעת האירוע עודכנה בהצלחה."
+
+                return admin_html_response(
+                    success_title,
+                    _render_success_body(
+                        success_title,
+                        success_message,
+                        record_id=saved_event.id,
+                        message_url=_message_link(bot, saved_event.channel_id, saved_event.message_id),
+                    ),
+                )
+            except SalesBotError as exc:
+                return admin_html_response(
+                    "פאנל אירועים",
+                    _render_event_form(
+                        mode_label="ערוך" if event_id is not None else "צור",
+                        channels=channels,
+                        values=values,
+                        error_text=str(exc),
+                    ),
+                )
+
+        return admin_html_response(
+            "פאנל אירועים",
+            _render_event_form(
+                mode_label="ערוך" if event_id is not None else "צור",
+                channels=channels,
+                values=values,
+            ),
+        )
+    except SalesBotError as exc:
+        return _error_response("פאנל אירועים", str(exc), status=400)
+    except Exception:
+        LOGGER.exception("Unexpected event panel failure")
+        return _error_response("פאנל אירועים", "אירעה שגיאה לא צפויה בזמן טעינת פאנל האירועים.", status=500)

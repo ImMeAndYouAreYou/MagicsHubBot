@@ -4,6 +4,7 @@ from dataclasses import replace
 from io import BytesIO
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import aiosqlite
 import discord
@@ -34,17 +35,43 @@ class SystemService:
         paypal_link: str | None,
         roblox_gamepass_reference: str | None,
     ) -> SystemRecord:
-        folder = self.storage_root / f"{slugify(name)}-{file_attachment.id}"
         file_bytes = await file_attachment.read()
-        file_path = save_named_bytes(file_attachment.filename, file_bytes, folder)
-        safe_file_name = Path(file_attachment.filename).name or file_path.name
+        image_upload: tuple[str, bytes] | None = None
+        if image_attachment is not None:
+            image_upload = (image_attachment.filename, await image_attachment.read())
+        return await self.create_system_from_uploads(
+            name=name,
+            description=description,
+            file_upload=(file_attachment.filename, file_bytes),
+            image_upload=image_upload,
+            created_by=created_by,
+            paypal_link=paypal_link,
+            roblox_gamepass_reference=roblox_gamepass_reference,
+        )
+
+    async def create_system_from_uploads(
+        self,
+        *,
+        name: str,
+        description: str,
+        file_upload: tuple[str, bytes],
+        image_upload: tuple[str, bytes] | None,
+        created_by: int,
+        paypal_link: str | None,
+        roblox_gamepass_reference: str | None,
+    ) -> SystemRecord:
+        folder = self.storage_root / f"{slugify(name)}-{uuid4().hex[:12]}"
+        file_name, file_bytes = file_upload
+        file_path = save_named_bytes(file_name, file_bytes, folder)
+        safe_file_name = Path(file_name).name or file_path.name
         image_bytes: bytes | None = None
         image_path: Path | None = None
         safe_image_name: str | None = None
-        if image_attachment is not None:
-            image_bytes = await image_attachment.read()
-            image_path = save_named_bytes(image_attachment.filename, image_bytes, folder)
-            safe_image_name = Path(image_attachment.filename).name or image_path.name
+        if image_upload is not None:
+            image_name, image_bytes = image_upload
+            image_path = save_named_bytes(image_name, image_bytes, folder)
+            safe_image_name = Path(image_name).name or image_path.name
+
         roblox_gamepass_id = self.normalize_gamepass_reference(roblox_gamepass_reference)
         await self._ensure_gamepass_not_in_use(roblox_gamepass_id)
         system_id: int | None = None

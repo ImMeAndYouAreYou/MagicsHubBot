@@ -63,11 +63,18 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 
 - `/addadmin`
 - `/removeadmin`
+- `/adminsite`
+- `/discount`
+- `/removediscount`
+- `/editdiscount`
+- `/discountcalculator`
+- `/calculatetax`
 - `/addsystem`
 - `/editsystem`
 - `/systemslist`
 - `/removesystem`
 - `/sendsystem`
+- `/sendspecialsystem`
 - `/blacklist`
 - `/removeblacklist`
 - `/requestblacklistremove`
@@ -96,6 +103,10 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/editpoll`
 - `/giveaway`
 - `/editgiveaway`
+- `/createevent`
+- `/editevent`
+- `/rollrandomuser`
+- `/rerolluser`
 - `/trainbot`
 - `/endtraining`
 
@@ -114,6 +125,12 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Admins can revoke individual vouches from a dropdown list and remove the posted vouch message from the configured channel.
 - Roblox OAuth uses an aiohttp callback server and stores linked Roblox profile data per Discord user.
 - The server owner can separately link Roblox creator access with `/linkasowner`, then list, create, update, connect, and publish Roblox game passes for the configured universe.
+- Admins can open a Discord-authenticated website with `/adminsite` and manage admins, systems, ownership grants/removals by Discord user ID, special-system publishing, and existing poll/giveaway editors from one place.
+- Admins can store per-user per-system discount percentages with `/discount`, `/editdiscount`, and `/removediscount`, while `/discountcalculator` and `/calculatetax` post Roblox pricing math publicly in-channel.
+- `/sendspecialsystem` opens the website's special-system composer with a prefilled title so a staff member can publish a custom Hebrew sales page and Discord message.
+- Special-system listings support multiple uploaded images, per-method pricing for PayPal / Bit / Robux / 2014 users / JailBreak items, and a public Hebrew web order form behind Discord website login.
+- New special-order requests are sent to the configured owner in DM, stored in an admin-only website queue, and can be accepted or rejected from the site with a DM response back to the buyer.
+- Published special systems can now be edited, republished, activated again, or deactivated from the admin website without changing their public slug.
 - After Roblox linking succeeds, the bot can sync the member nickname to `username (display name)` and assign the configured Roblox verified role in the primary guild.
 - Admins can inspect another member's linked Roblox account with `/checkroblox`, including live Roblox profile data and the systems owned by that Discord user.
 - `/getsystem` checks the linked Roblox account against the configured system gamepass using Roblox inventory ownership before delivering the system.
@@ -123,6 +140,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - The custom-order flow posts a button panel, collects a modal request, previews it to the user, and sends it to the owner DM with accept or reject buttons.
 - Admin-only web panels can create and edit reaction-based polls with custom emoji options, channel selection, stored IDs, and automatic close/result updates.
 - Admin-only web panels can create and edit giveaways with durations, winner counts, requirement text, stored IDs, and automatic winner selection when the timer expires.
+- Admin-only web panels can create and edit events with reward text, star-reaction entry, stored IDs, and manual `/rollrandomuser` or `/rerolluser` winner control.
 - Systems can be edited through an admin dropdown plus web editor, including metadata, file replacement, image replacement, PayPal link, and Roblox gamepass updates.
 - The AI assistant answers in the configured support channel, can use a separate configured training channel for `/trainbot`, prioritizes admin-trained local knowledge entries over built-in docs, reads slash-command definitions plus workflow knowledge derived from the bot code and services, can read screenshots, public links, and text files, can silently learn useful support-channel context outside `/trainbot`, and if no training channel is configured it falls back to the support channel.
 
@@ -133,6 +151,7 @@ SQLite schema lives in `sales_bot/sql/schema.sql` and creates these primary tabl
 - `admins`
 - `systems`
 - `user_systems`
+- `system_discounts`
 - `delivery_messages`
 - `blacklist_entries`
 - `blacklist_appeals`
@@ -142,9 +161,15 @@ SQLite schema lives in `sales_bot/sql/schema.sql` and creates these primary tabl
 - `transfer_locks`
 - `oauth_states`
 - `roblox_links`
+- `web_oauth_states`
+- `web_sessions`
 - `admin_panel_sessions`
+- `special_systems`
+- `special_system_images`
+- `special_order_requests`
 - `polls`
 - `giveaways`
+- `events`
 - `ai_knowledge_entries`
 - `ai_training_state`
 

@@ -18,15 +18,18 @@ from sales_bot.services.ai_assistant import AIAssistantService
 from sales_bot.services.admins import AdminService
 from sales_bot.services.blacklist import BlacklistService
 from sales_bot.services.delivery import DeliveryService
-from sales_bot.services.engagement import GiveawayService, PollService
+from sales_bot.services.discounts import DiscountService
+from sales_bot.services.engagement import EventService, GiveawayService, PollService
 from sales_bot.services.oauth import RobloxOAuthService
 from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.panels import AdminPanelService
 from sales_bot.services.payments import PaymentService
 from sales_bot.services.roblox_creator import RobloxCreatorService
+from sales_bot.services.special_systems import SpecialSystemService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
+from sales_bot.services.web_auth import WebAuthService
 from sales_bot.ui.appeals import AppealDecisionView
 from sales_bot.ui.ownership import ClaimRolePanelView
 from sales_bot.ui.orders import OrderDecisionView, OrderPanelView
@@ -76,6 +79,7 @@ class SalesBot(commands.Bot):
         self.services = ServiceContainer(
             admins=AdminService(self.database, self.settings.owner_user_id),
             blacklist=BlacklistService(self.database),
+            discounts=DiscountService(self.database),
             systems=SystemService(self.database, self.settings.data_dir / "systems"),
             ownership=OwnershipService(self.database),
             orders=OrderService(self.database),
@@ -87,7 +91,10 @@ class SalesBot(commands.Bot):
             panels=AdminPanelService(self.database, self.settings.admin_panel_session_minutes),
             polls=PollService(self.database),
             giveaways=GiveawayService(self.database),
+            events=EventService(self.database),
             ai_assistant=AIAssistantService(self.database, self.settings),
+            web_auth=WebAuthService(self.database, self.settings),
+            special_systems=SpecialSystemService(self.database),
         )
 
 
@@ -111,11 +118,13 @@ class SalesBot(commands.Bot):
             try:
                 finalized_polls = await self.services.polls.close_due_polls(self)
                 finalized_giveaways = await self.services.giveaways.close_due_giveaways(self)
-                if finalized_polls or finalized_giveaways:
+                finalized_events = await self.services.events.close_due_events(self)
+                if finalized_polls or finalized_giveaways or finalized_events:
                     LOGGER.info(
-                        "Maintenance finalized %s polls and %s giveaways",
+                        "Maintenance finalized %s polls, %s giveaways, and %s events",
                         finalized_polls,
                         finalized_giveaways,
+                        finalized_events,
                     )
             except asyncio.CancelledError:
                 raise
@@ -135,6 +144,16 @@ class SalesBot(commands.Bot):
 
             synced = await self.tree.sync()
             LOGGER.info("Synced %s global commands", len(synced))
+
+            if self.settings.primary_guild_id:
+                guild = discord.Object(id=self.settings.primary_guild_id)
+                self.tree.copy_global_to(guild=guild)
+                guild_synced = await self.tree.sync(guild=guild)
+                LOGGER.info(
+                    "Synced %s commands to primary guild %s",
+                    len(guild_synced),
+                    self.settings.primary_guild_id,
+                )
 
     def _schedule_command_resync(self) -> None:
         if self._command_sync_lock.locked():

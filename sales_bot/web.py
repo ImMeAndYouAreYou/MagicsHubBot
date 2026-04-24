@@ -8,11 +8,28 @@ from aiohttp import web
 
 from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.web_admin import (
+    event_create_page,
+    event_edit_page,
     giveaway_create_page,
     giveaway_edit_page,
     poll_create_page,
     poll_edit_page,
     system_edit_page,
+)
+from sales_bot.web_portal import (
+    admin_admins_page,
+    admin_dashboard_page,
+    admin_gamepasses_page,
+    admin_systems_page,
+    special_order_detail_page,
+    special_orders_list_page,
+    special_system_compose_page,
+    special_system_edit_page,
+    special_system_image_page,
+    special_system_page,
+    website_callback,
+    website_login,
+    website_logout,
 )
 
 if TYPE_CHECKING:
@@ -29,16 +46,31 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/privacy", privacy_page)
     app.router.add_get("/terms", terms_page)
     app.router.add_get("/health", healthcheck)
+    app.router.add_get("/auth/discord/login", website_login)
+    app.router.add_get("/auth/discord/callback", website_callback)
+    app.router.add_get("/auth/logout", website_logout)
     app.router.add_post("/api/roblox/game/bootstrap", roblox_game_bootstrap)
     app.router.add_get("/oauth/roblox/callback", roblox_callback)
     app.router.add_get("/oauth/roblox/owner/callback", roblox_owner_callback)
     app.router.add_post("/webhooks/paypal/simulate", paypal_webhook)
     app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
+    app.router.add_get("/admin", admin_dashboard_page)
+    app.router.add_route("*", "/admin/admins", admin_admins_page)
+    app.router.add_route("*", "/admin/systems", admin_systems_page)
+    app.router.add_route("*", "/admin/gamepasses", admin_gamepasses_page)
+    app.router.add_route("*", "/admin/special-systems", special_system_compose_page)
+    app.router.add_route("*", "/admin/special-systems/{special_system_id:\\d+}/edit", special_system_edit_page)
+    app.router.add_get("/admin/special-orders", special_orders_list_page)
+    app.router.add_route("*", "/admin/special-orders/{order_id:\\d+}", special_order_detail_page)
     app.router.add_route("*", "/admin/polls/new", poll_create_page)
     app.router.add_route("*", "/admin/polls/{poll_id:\\d+}/edit", poll_edit_page)
     app.router.add_route("*", "/admin/giveaways/new", giveaway_create_page)
     app.router.add_route("*", "/admin/giveaways/{giveaway_id:\\d+}/edit", giveaway_edit_page)
+    app.router.add_route("*", "/admin/events/new", event_create_page)
+    app.router.add_route("*", "/admin/events/{event_id:\\d+}/edit", event_edit_page)
     app.router.add_route("*", "/admin/systems/{system_id:\\d+}/edit", system_edit_page)
+    app.router.add_get("/special-system-images/{image_id:\\d+}", special_system_image_page)
+    app.router.add_route("*", "/special-systems/{slug}", special_system_page)
     return app
 
 

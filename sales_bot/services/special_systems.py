@@ -92,7 +92,7 @@ class SpecialSystemService:
         parameters: tuple[Any, ...] = ()
         if active_only:
             query += " WHERE is_active = ?"
-            parameters = (1,)
+            parameters = (True,)
         query += " ORDER BY LOWER(title) ASC, id ASC"
         rows = await self.database.fetchall(query, parameters)
         return [self._map_special_system(row) for row in rows]
@@ -106,7 +106,7 @@ class SpecialSystemService:
     async def get_special_system_by_slug(self, slug: str) -> SpecialSystemRecord:
         row = await self.database.fetchone(
             "SELECT * FROM special_systems WHERE LOWER(slug) = LOWER(?) AND is_active = ?",
-            (slug.strip(), 1),
+            (slug.strip(), True),
         )
         if row is None:
             raise NotFoundError("המערכת המיוחדת לא נמצאה.")
@@ -200,7 +200,7 @@ class SpecialSystemService:
             SET is_active = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (1 if is_active else 0, special_system_id),
+            (is_active, special_system_id),
         )
         return await self.get_special_system(special_system_id)
 

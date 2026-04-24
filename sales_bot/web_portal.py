@@ -136,7 +136,7 @@ def _admin_shell(
                 <a href="/admin/systems">מערכות</a>
                 <a href="/admin/gamepasses">גיימפאסים</a>
                 <a href="/admin/special-systems">מערכות מיוחדות</a>
-                <a href="/admin/special-orders">בקשות מיוחדות</a>
+                <a href="/admin/special-orders">הזמנות מיוחדות</a>
                 <a href="/admin/polls/new">סקרים</a>
                 <a href="/admin/giveaways/new">הגרלות</a>
                 <a href="/admin/events/new">אירועים</a>
@@ -710,12 +710,21 @@ async def website_logout(request: web.Request) -> web.Response:
 async def admin_dashboard_page(request: web.Request) -> web.Response:
     try:
         bot, session = await _require_admin_session(request)
-        admin_ids = await bot.services.admins.list_admin_ids()
-        systems = await bot.services.systems.list_systems()
-        pending_custom_orders = await bot.services.orders.list_requests(statuses=("pending",))
-        special_systems = await bot.services.special_systems.list_special_systems(active_only=True)
-        rollable_events = await bot.services.events.list_rollable_events()
-        pending_special_orders = await bot.services.special_systems.list_order_requests(statuses=("pending",))
+        (
+            admin_ids,
+            systems,
+            pending_custom_orders,
+            special_systems,
+            rollable_events,
+            pending_special_orders,
+        ) = await asyncio.gather(
+            bot.services.admins.list_admin_ids(),
+            bot.services.systems.list_systems(),
+            bot.services.orders.list_requests(statuses=("pending",)),
+            bot.services.special_systems.list_special_systems(active_only=True),
+            bot.services.events.list_rollable_events(),
+            bot.services.special_systems.list_order_requests(statuses=("pending",)),
+        )
         stats = f"""
         <div class="stat-grid">
             <div class="card"><h2>אדמינים</h2><div class="stat-value">{len(admin_ids)}</div></div>

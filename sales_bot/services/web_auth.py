@@ -137,7 +137,6 @@ class WebAuthService:
         return await self.get_session(token)
 
     async def get_session(self, token: str) -> WebsiteSessionRecord:
-        await self.cleanup_expired()
         row = await self.database.fetchone("SELECT * FROM web_sessions WHERE token = ?", (token,))
         if row is None:
             raise NotFoundError("סשן האתר לא נמצא או שפג תוקפו.")
@@ -147,18 +146,26 @@ class WebAuthService:
         except ValueError as exc:
             await self.database.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
             raise NotFoundError("סשן האתר לא נמצא או שפג תוקפו.") from exc
-        if expires_at < datetime.now(UTC):
+        now = datetime.now(UTC)
+        if expires_at < now:
             await self.database.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
             raise NotFoundError("סשן האתר לא נמצא או שפג תוקפו.")
 
-        refreshed_expires_at = datetime.now(UTC) + timedelta(hours=self.SESSION_LIFETIME_HOURS)
+        refreshed_expires_at = now + timedelta(hours=self.SESSION_LIFETIME_HOURS)
         await self.database.execute(
-            "UPDATE web_sessions SET last_seen_at = CURRENT_TIMESTAMP, expires_at = ? WHERE token = ?",
-            (refreshed_expires_at.isoformat(), token),
+            "UPDATE web_sessions SET last_seen_at = ?, expires_at = ? WHERE token = ?",
+            (now.isoformat(), refreshed_expires_at.isoformat(), token),
         )
-        row = await self.database.fetchone("SELECT * FROM web_sessions WHERE token = ?", (token,))
-        assert row is not None
-        return self._map_session(row)
+        return WebsiteSessionRecord(
+            token=record.token,
+            discord_user_id=record.discord_user_id,
+            username=record.username,
+            global_name=record.global_name,
+            avatar_hash=record.avatar_hash,
+            expires_at=refreshed_expires_at.isoformat(),
+            created_at=record.created_at,
+            last_seen_at=now.isoformat(),
+        )
 
     async def delete_session(self, token: str) -> None:
         await self.database.execute("DELETE FROM web_sessions WHERE token = ?", (token,))

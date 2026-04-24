@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -35,6 +36,9 @@ from sales_bot.web_admin import (
 
 if TYPE_CHECKING:
     from sales_bot.bot import SalesBot
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 PORTAL_STYLE = """
@@ -206,6 +210,9 @@ async def _current_site_session(request: web.Request) -> tuple["SalesBot", Websi
     try:
         session = await bot.services.web_auth.get_session(token)
     except SalesBotError:
+        return bot, None
+    except Exception:
+        LOGGER.warning("Ignoring invalid website session cookie during request to %s", request.path, exc_info=True)
         return bot, None
     return bot, session
 

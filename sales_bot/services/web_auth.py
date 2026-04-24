@@ -66,7 +66,11 @@ class WebAuthService:
         if row is None:
             raise NotFoundError("חיבור האתר פג תוקף. נסה להתחבר שוב.")
 
-        expires_at = datetime.fromisoformat(str(row["expires_at"]))
+        try:
+            expires_at = datetime.fromisoformat(str(row["expires_at"]))
+        except ValueError as exc:
+            await self.database.execute("DELETE FROM web_oauth_states WHERE state = ?", (state,))
+            raise NotFoundError("חיבור האתר פג תוקף. נסה להתחבר שוב.") from exc
         if expires_at < datetime.now(UTC):
             await self.database.execute("DELETE FROM web_oauth_states WHERE state = ?", (state,))
             raise NotFoundError("חיבור האתר פג תוקף. נסה להתחבר שוב.")
@@ -138,7 +142,11 @@ class WebAuthService:
         if row is None:
             raise NotFoundError("סשן האתר לא נמצא או שפג תוקפו.")
         record = self._map_session(row)
-        expires_at = datetime.fromisoformat(record.expires_at)
+        try:
+            expires_at = datetime.fromisoformat(record.expires_at)
+        except ValueError as exc:
+            await self.database.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
+            raise NotFoundError("סשן האתר לא נמצא או שפג תוקפו.") from exc
         if expires_at < datetime.now(UTC):
             await self.database.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
             raise NotFoundError("סשן האתר לא נמצא או שפג תוקפו.")

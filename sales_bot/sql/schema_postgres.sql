@@ -297,8 +297,6 @@ CREATE TABLE IF NOT EXISTS discount_code_redemptions (
     redeemed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_website_checkout_orders_paypal_order_id ON website_checkout_orders(paypal_order_id);
-
 CREATE TABLE IF NOT EXISTS website_notifications (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,

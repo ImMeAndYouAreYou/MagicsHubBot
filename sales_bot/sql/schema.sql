@@ -315,8 +315,6 @@ CREATE TABLE IF NOT EXISTS discount_code_redemptions (
     FOREIGN KEY (order_id) REFERENCES website_checkout_orders(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_website_checkout_orders_paypal_order_id ON website_checkout_orders(paypal_order_id);
-
 CREATE TABLE IF NOT EXISTS website_notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,

@@ -58,7 +58,7 @@ from sales_bot.web_portal import (
     website_logout,
     website_paypal_cancel_page,
     website_paypal_purchase_page,
-        website_paypal_return_page,
+    website_paypal_return_page,
 )
 
 if TYPE_CHECKING:

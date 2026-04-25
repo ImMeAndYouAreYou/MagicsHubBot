@@ -77,110 +77,251 @@ def admin_html_response(title: str, body: str) -> web.Response:
         <style>
             :root {{
                 color-scheme: dark;
-                --bg-radial-1: rgba(85, 214, 190, 0.16);
-                --bg-radial-2: rgba(91, 143, 249, 0.18);
-                --bg-start: #03080f;
-                --bg-mid: #07111f;
-                --bg-end: #0d1e31;
-                --panel: rgba(12, 29, 49, 0.88);
-                --panel-border: rgba(133, 198, 255, 0.16);
-                --surface-card: rgba(9, 21, 36, 0.78);
-                --surface-soft: rgba(163, 190, 213, 0.1);
-                --surface-border: rgba(134, 167, 201, 0.15);
-                --surface-border-strong: rgba(134, 167, 201, 0.24);
-                --surface-hero-start: rgba(16, 37, 61, 0.92);
-                --surface-hero-end: rgba(8, 20, 35, 0.82);
-                --text: #f6fbff;
-                --muted: #a3bed5;
-                --accent: #55d6be;
-                --accent-strong: #26b89d;
-                --accent-soft: rgba(85, 214, 190, 0.12);
-                --accent-border: rgba(85, 214, 190, 0.28);
+                --bg-radial-1: rgba(48, 198, 255, 0.15);
+                --bg-radial-2: rgba(109, 167, 255, 0.16);
+                --bg-start: #2f445d;
+                --bg-mid: #334a64;
+                --bg-end: #2b4059;
+                --panel: rgba(35, 51, 71, 0.88);
+                --panel-border: rgba(173, 201, 228, 0.18);
+                --surface-card: rgba(45, 64, 88, 0.78);
+                --surface-strong: rgba(31, 46, 64, 0.9);
+                --surface-soft: rgba(208, 226, 245, 0.06);
+                --surface-border: rgba(177, 205, 231, 0.14);
+                --surface-border-strong: rgba(177, 205, 231, 0.24);
+                --surface-hero-start: rgba(58, 82, 111, 0.92);
+                --surface-hero-end: rgba(43, 61, 84, 0.86);
+                --text: #f8fbff;
+                --muted: #cad7e5;
+                --accent: #29c8ff;
+                --accent-strong: #138fd0;
+                --accent-soft: rgba(41, 200, 255, 0.13);
+                --accent-border: rgba(41, 200, 255, 0.3);
                 --danger: #ff8579;
                 --danger-soft: rgba(255, 133, 121, 0.12);
-                --danger-border: rgba(255, 133, 121, 0.26);
-                --warning-soft: rgba(255, 215, 125, 0.12);
-                --warning-border: rgba(255, 215, 125, 0.28);
-                --warning-text: #ffe8ae;
-                --success-soft: rgba(85, 214, 190, 0.12);
-                --success-border: rgba(85, 214, 190, 0.24);
-                --success-text: #d9fff8;
-                --field: rgba(8, 20, 35, 0.78);
-                --button-text: #041019;
+                --danger-border: rgba(255, 133, 121, 0.24);
+                --warning-soft: rgba(255, 210, 112, 0.14);
+                --warning-border: rgba(255, 210, 112, 0.3);
+                --warning-text: #ffefc2;
+                --success-soft: rgba(84, 228, 190, 0.14);
+                --success-border: rgba(84, 228, 190, 0.24);
+                --success-text: #e6fff8;
+                --field: rgba(30, 45, 62, 0.92);
+                --button-text: #f8fcff;
+                --shadow-lg: 0 28px 80px rgba(8, 16, 28, 0.28);
+                --shadow-md: 0 18px 42px rgba(8, 16, 28, 0.18);
             }}
             html[data-theme="dark"] {{
                 color-scheme: dark;
-                --bg-radial-1: rgba(90, 232, 205, 0.18);
-                --bg-radial-2: rgba(76, 126, 235, 0.22);
-                --bg-start: #02060c;
-                --bg-mid: #06101d;
-                --bg-end: #0a1726;
-                --panel: rgba(8, 20, 33, 0.92);
-                --panel-border: rgba(118, 180, 234, 0.18);
-                --field: rgba(5, 16, 28, 0.88);
-                --surface-card: rgba(6, 17, 29, 0.84);
-                --surface-soft: rgba(111, 146, 181, 0.09);
-                --surface-border: rgba(118, 180, 234, 0.16);
-                --surface-border-strong: rgba(118, 180, 234, 0.24);
-                --surface-hero-start: rgba(10, 28, 47, 0.96);
-                --surface-hero-end: rgba(4, 14, 24, 0.9);
+                --bg-radial-1: rgba(45, 211, 255, 0.16);
+                --bg-radial-2: rgba(77, 127, 244, 0.18);
+                --bg-start: #141f2c;
+                --bg-mid: #172535;
+                --bg-end: #111a26;
+                --panel: rgba(20, 31, 45, 0.92);
+                --panel-border: rgba(146, 179, 212, 0.18);
+                --surface-card: rgba(26, 38, 54, 0.84);
+                --surface-strong: rgba(18, 28, 41, 0.92);
+                --surface-soft: rgba(173, 196, 218, 0.06);
+                --surface-border: rgba(146, 179, 212, 0.16);
+                --surface-border-strong: rgba(146, 179, 212, 0.24);
+                --surface-hero-start: rgba(31, 47, 68, 0.96);
+                --surface-hero-end: rgba(20, 30, 43, 0.92);
+                --field: rgba(15, 24, 35, 0.92);
             }}
             html[data-theme="light"] {{
                 color-scheme: light;
-                --bg-radial-1: rgba(85, 214, 190, 0.14);
-                --bg-radial-2: rgba(91, 143, 249, 0.16);
-                --bg-start: #eff7ff;
-                --bg-mid: #edf5fc;
-                --bg-end: #dfe9f6;
-                --panel: rgba(255, 255, 255, 0.9);
-                --panel-border: rgba(73, 116, 167, 0.16);
-                --surface-card: rgba(255, 255, 255, 0.82);
-                --surface-soft: rgba(34, 90, 148, 0.06);
-                --surface-border: rgba(73, 116, 167, 0.14);
-                --surface-border-strong: rgba(73, 116, 167, 0.22);
-                --surface-hero-start: rgba(240, 248, 255, 0.96);
-                --surface-hero-end: rgba(226, 238, 250, 0.92);
-                --text: #10233a;
-                --muted: #48627d;
-                --accent: #108c7c;
-                --accent-strong: #0d6f64;
-                --accent-soft: rgba(16, 140, 124, 0.1);
-                --accent-border: rgba(16, 140, 124, 0.2);
-                --danger: #b42318;
-                --danger-soft: rgba(180, 35, 24, 0.08);
-                --danger-border: rgba(180, 35, 24, 0.18);
-                --warning-soft: rgba(209, 138, 17, 0.1);
-                --warning-border: rgba(209, 138, 17, 0.18);
-                --warning-text: #8a5a09;
-                --success-soft: rgba(16, 140, 124, 0.08);
-                --success-border: rgba(16, 140, 124, 0.18);
-                --success-text: #0b5e55;
-                --field: rgba(248, 251, 255, 0.94);
+                --bg-radial-1: rgba(48, 198, 255, 0.12);
+                --bg-radial-2: rgba(109, 167, 255, 0.14);
+                --bg-start: #eef4fb;
+                --bg-mid: #e7eef7;
+                --bg-end: #dde6f2;
+                --panel: rgba(250, 252, 255, 0.92);
+                --panel-border: rgba(88, 120, 154, 0.16);
+                --surface-card: rgba(255, 255, 255, 0.86);
+                --surface-strong: rgba(241, 246, 252, 0.96);
+                --surface-soft: rgba(54, 90, 128, 0.06);
+                --surface-border: rgba(88, 120, 154, 0.14);
+                --surface-border-strong: rgba(88, 120, 154, 0.22);
+                --surface-hero-start: rgba(248, 251, 255, 0.98);
+                --surface-hero-end: rgba(232, 239, 247, 0.94);
+                --text: #1f3146;
+                --muted: #536a83;
+                --accent: #0f8fc4;
+                --accent-strong: #0a6f9c;
+                --accent-soft: rgba(15, 143, 196, 0.1);
+                --accent-border: rgba(15, 143, 196, 0.2);
+                --danger: #b83c32;
+                --danger-soft: rgba(184, 60, 50, 0.08);
+                --danger-border: rgba(184, 60, 50, 0.18);
+                --warning-soft: rgba(201, 143, 35, 0.1);
+                --warning-border: rgba(201, 143, 35, 0.18);
+                --warning-text: #93620f;
+                --success-soft: rgba(11, 132, 109, 0.1);
+                --success-border: rgba(11, 132, 109, 0.18);
+                --success-text: #0d6758;
+                --field: rgba(248, 251, 255, 0.96);
                 --button-text: #f8fcff;
+                --shadow-lg: 0 28px 72px rgba(45, 71, 100, 0.16);
+                --shadow-md: 0 16px 34px rgba(45, 71, 100, 0.12);
             }}
             * {{ box-sizing: border-box; }}
+            html {{ min-height: 100%; }}
             body {{
                 margin: 0;
                 min-height: 100vh;
-                font-family: Bahnschrift, "Trebuchet MS", "Aptos", sans-serif;
+                font-family: Bahnschrift, "Aptos", "Trebuchet MS", sans-serif;
                 color: var(--text);
                 background:
-                    radial-gradient(circle at 20% 10%, var(--bg-radial-1), transparent 32%),
-                    radial-gradient(circle at 80% 0%, var(--bg-radial-2), transparent 30%),
-                    linear-gradient(160deg, var(--bg-start) 0%, var(--bg-mid) 48%, var(--bg-end) 100%);
+                    radial-gradient(circle at 18% 10%, var(--bg-radial-1), transparent 34%),
+                    radial-gradient(circle at 82% 2%, var(--bg-radial-2), transparent 30%),
+                    linear-gradient(180deg, var(--bg-start) 0%, var(--bg-mid) 52%, var(--bg-end) 100%);
+                background-attachment: fixed;
+            }}
+            body::before,
+            body::after {{
+                content: "";
+                position: fixed;
+                inset: auto;
+                width: 28rem;
+                height: 28rem;
+                border-radius: 999px;
+                pointer-events: none;
+                filter: blur(12px);
+                opacity: 0.65;
+                z-index: 0;
+            }}
+            body::before {{
+                top: -8rem;
+                left: -7rem;
+                background: radial-gradient(circle, var(--bg-radial-1) 0%, transparent 72%);
+            }}
+            body::after {{
+                top: 10rem;
+                right: -10rem;
+                background: radial-gradient(circle, var(--bg-radial-2) 0%, transparent 72%);
             }}
             main {{
                 width: min(100%, 1680px);
                 margin: 0 auto;
-                padding: 28px 24px 72px;
+                padding: 22px 24px 72px;
+                position: relative;
+                z-index: 1;
+            }}
+            .page-utility {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 16px;
+                flex-wrap: wrap;
+                margin-bottom: 18px;
+            }}
+            .brand-mark {{
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 16px;
+                border-radius: 18px;
+                border: 1px solid var(--panel-border);
+                background: var(--panel);
+                color: var(--text);
+                text-decoration: none;
+                box-shadow: var(--shadow-md);
+                backdrop-filter: blur(14px);
+            }}
+            .brand-mark__dot {{
+                width: 12px;
+                height: 12px;
+                border-radius: 999px;
+                background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+                box-shadow: 0 0 0 6px var(--accent-soft);
+                flex: 0 0 auto;
+            }}
+            .brand-mark span {{
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                font-weight: 700;
+            }}
+            .brand-mark small {{
+                color: var(--muted);
+                font-size: 0.72rem;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+            }}
+            .utility-actions {{
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+            }}
+            .utility-label {{
+                color: var(--muted);
+                font-size: 0.8rem;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+            }}
+            .theme-toolbar {{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px;
+                border-radius: 18px;
+                border: 1px solid var(--panel-border);
+                background: var(--panel);
+                box-shadow: var(--shadow-md);
+                backdrop-filter: blur(14px);
+            }}
+            .theme-pill,
+            button.theme-pill {{
+                border: 1px solid transparent;
+                border-radius: 999px;
+                padding: 10px 15px;
+                background: transparent;
+                color: var(--muted);
+                font: inherit;
+                font-weight: 700;
+                cursor: pointer;
+                box-shadow: none;
+                transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+            }}
+            .theme-pill:hover,
+            button.theme-pill:hover {{
+                color: var(--text);
+                background: var(--surface-soft);
+                border-color: var(--surface-border);
+                transform: translateY(-1px);
+            }}
+            .theme-pill.is-active,
+            button.theme-pill.is-active {{
+                color: var(--button-text);
+                background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+                border-color: transparent;
+                box-shadow: 0 12px 24px rgba(19, 143, 208, 0.22);
             }}
             .shell {{
-                background: var(--panel);
+                position: relative;
+                overflow: hidden;
+                background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%), var(--panel);
                 border: 1px solid var(--panel-border);
-                border-radius: 30px;
-                padding: 40px;
-                box-shadow: 0 30px 80px rgba(0, 0, 0, 0.24);
-                backdrop-filter: blur(14px);
+                border-radius: 26px;
+                padding: 34px 34px 40px 54px;
+                box-shadow: var(--shadow-lg);
+                backdrop-filter: blur(18px);
+            }}
+            .shell::before {{
+                content: "";
+                position: absolute;
+                top: 24px;
+                bottom: 24px;
+                left: 20px;
+                width: 4px;
+                border-radius: 999px;
+                background: linear-gradient(180deg, transparent 0%, var(--accent) 16%, var(--accent) 84%, transparent 100%);
+                opacity: 0.95;
+            }}
+            .shell > * {{
+                position: relative;
             }}
             .eyebrow {{
                 margin: 0 0 10px;
@@ -191,14 +332,26 @@ def admin_html_response(title: str, body: str) -> web.Response:
             }}
             h1 {{
                 margin: 0 0 10px;
-                font-size: clamp(2.35rem, 4vw, 3.65rem);
-                line-height: 1.05;
+                font-size: clamp(2.25rem, 4vw, 3.45rem);
+                line-height: 1.08;
+                letter-spacing: -0.03em;
+            }}
+            h2,
+            h3 {{
+                margin: 0 0 10px;
+                color: var(--text);
             }}
             p, li, label, small {{
                 color: var(--muted);
                 line-height: 1.65;
             }}
-            a {{ color: var(--accent); }}
+            strong {{ color: var(--text); }}
+            a {{
+                color: var(--accent);
+                text-decoration-thickness: 0.08em;
+                text-underline-offset: 0.18em;
+            }}
+            a:hover {{ color: var(--text); }}
             form {{ margin-top: 24px; }}
             .grid {{
                 display: grid;
@@ -210,36 +363,53 @@ def admin_html_response(title: str, body: str) -> web.Response:
             input, select, textarea {{
                 width: 100%;
                 border: 1px solid var(--surface-border);
-                border-radius: 14px;
+                border-radius: 16px;
                 background: var(--field);
                 color: var(--text);
                 padding: 14px 16px;
                 font: inherit;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+                transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+            }}
+            input:focus,
+            select:focus,
+            textarea:focus {{
+                outline: none;
+                border-color: var(--accent-border);
+                box-shadow: 0 0 0 4px var(--accent-soft);
             }}
             textarea {{ min-height: 150px; resize: vertical; }}
             .option-list {{ display: flex; flex-direction: column; gap: 12px; }}
             .option-row {{ display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: center; }}
             .actions {{ display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; }}
             button, .link-button {{
-                border: 0;
+                border: 1px solid transparent;
                 border-radius: 999px;
-                padding: 13px 18px;
+                padding: 13px 19px;
                 background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
                 color: var(--button-text);
                 font: inherit;
                 font-weight: 700;
                 text-decoration: none;
                 cursor: pointer;
+                box-shadow: 0 16px 28px rgba(19, 143, 208, 0.2);
+                transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+            }}
+            button:hover,
+            .link-button:hover {{
+                transform: translateY(-1px);
+                box-shadow: 0 18px 34px rgba(19, 143, 208, 0.24);
             }}
             .ghost-button {{
                 background: var(--surface-soft);
                 color: var(--text);
                 border: 1px solid var(--surface-border);
+                box-shadow: none;
             }}
             .danger {{ color: var(--danger); }}
             .notice {{
-                border-radius: 18px;
-                padding: 14px 16px;
+                border-radius: 20px;
+                padding: 15px 18px;
                 margin-top: 18px;
                 background: var(--danger-soft);
                 border: 1px solid var(--danger-border);
@@ -253,22 +423,107 @@ def admin_html_response(title: str, body: str) -> web.Response:
             .meta-card {{
                 margin-top: 20px;
                 padding: 18px;
-                border-radius: 18px;
+                border-radius: 20px;
                 background: var(--surface-card);
                 border: 1px solid var(--surface-border);
             }}
+            .marketing-shell {{ display: flex; flex-direction: column; gap: 22px; }}
+            .marketing-hero {{
+                padding: 28px 30px;
+                border-radius: 22px;
+                background: linear-gradient(135deg, var(--surface-hero-start) 0%, var(--surface-hero-end) 100%);
+                border: 1px solid var(--surface-border-strong);
+            }}
+            .marketing-panel {{
+                padding: 28px 30px;
+                border-radius: 22px;
+                background: var(--surface-card);
+                border: 1px solid var(--surface-border);
+                box-shadow: var(--shadow-md);
+            }}
+            .copy-stack {{ display: flex; flex-direction: column; gap: 16px; }}
+            .doc-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }}
+            .doc-card {{
+                padding: 22px;
+                border-radius: 20px;
+                background: var(--surface-strong);
+                border: 1px solid var(--surface-border);
+            }}
+            .doc-list {{ margin: 0; padding-inline-start: 20px; }}
+            .inline-link-grid {{ display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }}
             @media (max-width: 700px) {{
+                main {{ padding: 18px 16px 52px; }}
+                .page-utility {{ align-items: stretch; }}
+                .utility-actions {{ justify-content: space-between; width: 100%; }}
+                .theme-toolbar {{ width: 100%; justify-content: space-between; }}
+                .theme-pill,
+                button.theme-pill {{ flex: 1 1 0; justify-content: center; }}
                 .shell {{ padding: 22px; border-radius: 22px; }}
+                .shell::before {{ display: none; }}
+                .marketing-hero,
+                .marketing-panel {{ padding: 22px; }}
                 .option-row {{ grid-template-columns: 1fr; }}
             }}
         </style>
     </head>
     <body>
         <main>
+            <div class="page-utility">
+                <a class="brand-mark" href="/">
+                    <span class="brand-mark__dot"></span>
+                    <span>Magic Studio's<small>Web Portal</small></span>
+                </a>
+                <div class="utility-actions">
+                    <span class="utility-label">Display</span>
+                    <div class="theme-toolbar" role="group" aria-label="Theme selection">
+                        <button type="button" class="theme-pill" data-theme-mode="default">ברירת מחדל</button>
+                        <button type="button" class="theme-pill" data-theme-mode="dark">כהה</button>
+                        <button type="button" class="theme-pill" data-theme-mode="light">בהיר</button>
+                    </div>
+                </div>
+            </div>
             <section class="shell">
                 {body}
             </section>
         </main>
+        <script>
+            (() => {{
+                const themes = new Set(['default', 'dark', 'light']);
+                const root = document.documentElement;
+                const buttons = Array.from(document.querySelectorAll('[data-theme-mode]'));
+
+                const readTheme = () => {{
+                    const match = document.cookie.match(/(?:^|; )magic_admin_theme=([^;]+)/);
+                    if (!match) {{
+                        return 'default';
+                    }}
+                    const theme = decodeURIComponent(match[1] || '').trim().toLowerCase();
+                    return themes.has(theme) ? theme : 'default';
+                }};
+
+                const syncButtons = (theme) => {{
+                    buttons.forEach((button) => {{
+                        const isActive = button.dataset.themeMode === theme;
+                        button.classList.toggle('is-active', isActive);
+                        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                    }});
+                }};
+
+                const applyTheme = (theme) => {{
+                    const safeTheme = themes.has(theme) ? theme : 'default';
+                    root.dataset.theme = safeTheme;
+                    document.cookie = `magic_admin_theme=${{encodeURIComponent(safeTheme)}}; Max-Age=31536000; Path=/; SameSite=Lax`;
+                    syncButtons(safeTheme);
+                }};
+
+                const initialTheme = themes.has(root.dataset.theme) ? root.dataset.theme : readTheme();
+                root.dataset.theme = initialTheme;
+                syncButtons(initialTheme);
+                buttons.forEach((button) => {{
+                    button.addEventListener('click', () => applyTheme(button.dataset.themeMode || 'default'));
+                }});
+            }})();
+        </script>
     </body>
     </html>
     """

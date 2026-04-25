@@ -6,8 +6,7 @@ from discord.ext import commands
 
 from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
-from sales_bot.exceptions import ExternalServiceError
-from sales_bot.ui.appeals import AppealDecisionView
+from sales_bot.exceptions import SalesBotError
 from sales_bot.ui.common import ConfirmView, PaginatedSelectView, edit_interaction_response
 
 
@@ -33,28 +32,29 @@ class BlacklistAppealModal(discord.ui.Modal):
             await interaction.response.send_message("אתה לא נמצא כרגע בבלאקליסט.", ephemeral=interaction.guild is not None)
             return
 
-        appeal = await self.bot.services.blacklist.create_appeal(
-            interaction.user.id,
-            str(self.answer_one),
-            str(self.answer_two),
-        )
-        owner = await self.bot.fetch_user(self.bot.settings.owner_user_id)
-        owner_dm = owner.dm_channel or await owner.create_dm()
-        embed = discord.Embed(title="בקשת הסרת בלאקליסט חדשה", color=discord.Color.orange())
-        embed.add_field(name="משתמש", value=f"{interaction.user.mention} ({interaction.user.id})", inline=False)
-        embed.add_field(name="למה קיבלת בלאקליסט?", value=str(self.answer_one), inline=False)
-        embed.add_field(name="למה שנסיר לך את הבלאקליסט?", value=str(self.answer_two), inline=False)
-        embed.set_footer(text=f"מספר בקשה: {appeal.id}")
-
-        view = AppealDecisionView(self.bot, appeal.id, interaction.user.id)
         try:
-            owner_message = await owner_dm.send(embed=embed, view=view)
-        except discord.HTTPException as exc:
-            raise ExternalServiceError("לא ניתן לשלוח את הבקשה לבעלים דרך ההודעות הישירות.") from exc
+            appeal = await self.bot.services.blacklist.create_appeal(
+                interaction.user.id,
+                str(self.answer_one),
+                str(self.answer_two),
+            )
+            user_label = str(getattr(interaction.user, "display_name", "") or interaction.user.name or interaction.user.id)
+            for admin_user_id in dict.fromkeys(await self.bot.services.admins.list_admin_ids()):
+                await self.bot.services.notifications.create_notification(
+                    user_id=admin_user_id,
+                    title=f"ערעור בלאקליסט חדש #{appeal.id}",
+                    body=f"{user_label} ({interaction.user.id}) שלח ערעור חדש. אפשר לטפל בו מתוך דף הבלאקליסט באתר.",
+                    link_path="/admin/blacklist",
+                    kind="admin-blacklist-appeal",
+                )
+        except SalesBotError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=interaction.guild is not None)
+            return
 
-        await self.bot.services.blacklist.set_owner_message(appeal.id, owner_message.id)
-        self.bot.add_view(view, message_id=owner_message.id)
-        await interaction.response.send_message("בקשה נשלחה לבעלים לבדיקה.", ephemeral=interaction.guild is not None)
+        await interaction.response.send_message(
+            f"הערעור נשמר. האדמינים יבדקו אותו דרך האתר: {self.bot.settings.public_base_url}/blacklist-appeal",
+            ephemeral=interaction.guild is not None,
+        )
 
 
 class BlacklistCog(commands.Cog):

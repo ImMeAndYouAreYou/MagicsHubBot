@@ -20,6 +20,7 @@ from sales_bot.web_admin import (
 from sales_bot.web_portal import (
     account_payment_page,
     admin_admins_page,
+    admin_blacklist_page,
     admin_checkout_orders_page,
     admin_dashboard_page,
     admin_discount_codes_page,
@@ -28,6 +29,7 @@ from sales_bot.web_portal import (
     admin_settings_page,
     admin_systems_page,
     blacklist_appeal_page,
+    custom_order_image_page,
     custom_order_detail_page,
     custom_orders_list_page,
     custom_orders_page,
@@ -41,6 +43,7 @@ from sales_bot.web_portal import (
     special_system_edit_page,
     special_system_image_page,
     special_system_page,
+    system_gallery_image_page,
     system_image_page,
     website_cart_page,
     website_checkout_page,
@@ -82,6 +85,7 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/systems/{system_id:\\d+}", public_system_detail_page)
     app.router.add_get("/systems/{system_id:\\d+}/buy/paypal", website_paypal_purchase_page)
     app.router.add_get("/system-images/{system_id:\\d+}", system_image_page)
+    app.router.add_get("/system-gallery-images/{image_id:\\d+}", system_gallery_image_page)
     app.router.add_get("/downloads/{system_id:\\d+}", owned_system_download_page)
     app.router.add_get("/special-systems", special_systems_page)
     app.router.add_route("*", "/blacklist-appeal", blacklist_appeal_page)
@@ -92,9 +96,11 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
     app.router.add_get("/admin", admin_dashboard_page)
     app.router.add_route("*", "/admin/admins", admin_admins_page)
+    app.router.add_route("*", "/admin/blacklist", admin_blacklist_page)
     app.router.add_route("*", "/admin/checkouts", admin_checkout_orders_page)
     app.router.add_route("*", "/admin/custom-orders", custom_orders_list_page)
     app.router.add_route("*", "/admin/custom-orders/{order_id:\\d+}", custom_order_detail_page)
+    app.router.add_get("/admin/custom-order-images/{image_id:\\d+}", custom_order_image_page)
     app.router.add_route("*", "/admin/discount-codes", admin_discount_codes_page)
     app.router.add_route("*", "/admin/systems", admin_systems_page)
     app.router.add_route("*", "/admin/gamepasses", admin_gamepasses_page)

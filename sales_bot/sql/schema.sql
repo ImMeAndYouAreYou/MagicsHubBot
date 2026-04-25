@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS systems (
     is_in_stock BOOLEAN NOT NULL DEFAULT 1,
     website_price TEXT,
     website_currency TEXT NOT NULL DEFAULT 'USD',
+    is_special_system BOOLEAN NOT NULL DEFAULT 0,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -36,6 +37,17 @@ CREATE TABLE IF NOT EXISTS system_assets (
     asset_bytes BLOB NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (system_id, asset_type),
+    FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS system_gallery_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    system_id INTEGER NOT NULL,
+    asset_name TEXT NOT NULL,
+    content_type TEXT,
+    asset_bytes BLOB NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
 );
 
@@ -190,6 +202,17 @@ CREATE TABLE IF NOT EXISTS order_requests (
     submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     reviewed_at TEXT,
     reviewed_by INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS order_request_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    asset_name TEXT NOT NULL,
+    content_type TEXT,
+    asset_bytes BLOB NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES order_requests(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS admin_panel_sessions (

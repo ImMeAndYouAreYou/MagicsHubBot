@@ -184,6 +184,7 @@ class DiscountService:
 
     @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:
+        row_keys = set(row.keys())
         return SystemRecord(
             id=int(row["system_id"]),
             name=str(row["system_name"]),
@@ -197,6 +198,7 @@ class DiscountService:
             is_in_stock=bool(row["system_is_in_stock"]),
             website_price=str(row["system_website_price"]) if row["system_website_price"] else None,
             website_currency=str(row["system_website_currency"] or "USD").upper(),
+            is_special_system=bool(row["system_is_special_system"]) if "system_is_special_system" in row_keys else False,
             created_by=int(row["system_created_by"]) if row["system_created_by"] is not None else None,
             created_at=str(row["system_created_at"]),
         )

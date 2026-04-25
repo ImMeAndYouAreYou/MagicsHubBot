@@ -17,6 +17,7 @@ class SystemRecord:
     is_in_stock: bool
     website_price: str | None
     website_currency: str
+    is_special_system: bool
     created_by: int | None
     created_at: str
 
@@ -28,6 +29,17 @@ class SystemAssetRecord:
     asset_name: str
     asset_bytes: bytes
     updated_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class SystemGalleryImageRecord:
+    id: int
+    system_id: int
+    asset_name: str
+    content_type: str | None
+    asset_bytes: bytes
+    sort_order: int
+    created_at: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -303,6 +315,17 @@ class OrderRequestRecord:
     submitted_at: str
     reviewed_at: str | None
     reviewed_by: int | None
+
+
+@dataclass(slots=True, frozen=True)
+class OrderRequestImageRecord:
+    id: int
+    order_id: int
+    asset_name: str
+    content_type: str | None
+    asset_bytes: bytes
+    sort_order: int
+    created_at: str
 
 
 @dataclass(slots=True, frozen=True)

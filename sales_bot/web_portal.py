@@ -25,16 +25,17 @@ from sales_bot.models import (
     CheckoutOrderRecord,
     DiscountCodeRecord,
     NotificationRecord,
+    OrderRequestImageRecord,
     OrderRequestRecord,
     RobloxGamePassRecord,
     RobloxLinkRecord,
     SpecialOrderRequestRecord,
     SpecialSystemImageRecord,
     SpecialSystemRecord,
+    SystemGalleryImageRecord,
     SystemRecord,
     WebsiteSessionRecord,
 )
-from sales_bot.ui.appeals import AppealDecisionView
 from sales_bot.web_admin import (
     _error_response,
     _escape,
@@ -84,6 +85,7 @@ ADMIN_NAV_SECTIONS = (
     (
         "לקוחות",
         (
+            {"label": "בלאקליסט", "href": "/admin/blacklist", "matches": ("/admin/blacklist",)},
             {"label": "קודי הנחה", "href": "/admin/discount-codes", "matches": ("/admin/discount-codes",)},
             {"label": "התראות", "href": "/admin/notifications", "matches": ("/admin/notifications",)},
         ),
@@ -108,8 +110,6 @@ ADMIN_NAV_SECTIONS = (
 PUBLIC_NAV_ITEMS = (
     ("דף הבית", "/"),
     ("מערכות", "/systems"),
-    ("עגלה", "/cart"),
-    ("התראות", "/inbox"),
     ("מערכות מיוחדות", "/special-systems"),
     ("דירוגים", "/vouches"),
     ("מידע", "/info"),
@@ -125,6 +125,11 @@ PORTAL_STYLE = """
 .user-chip img { width: 42px; height: 42px; border-radius: 14px; object-fit: cover; border: 1px solid var(--surface-border-strong); }
 .account-link { color: inherit; text-decoration: none; }
 .account-link:hover { color: inherit; }
+.account-cluster { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.account-shortcuts { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shortcut-pill { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--surface-border); background: var(--surface-card); box-shadow: var(--shadow-md); color: var(--text); text-decoration: none; font-weight: 700; transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease, border-color 0.18s ease; }
+.shortcut-pill:hover { color: var(--text); background: var(--surface-soft); border-color: var(--accent-border); transform: translateY(-1px); }
+.shortcut-pill.is-active { color: var(--button-text); background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%); border-color: transparent; box-shadow: 0 14px 24px rgba(19, 143, 208, 0.2); }
 .public-shell-top { display: flex; flex-direction: column; gap: 16px; }
 .public-shell-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .public-heading { display: flex; flex-direction: column; gap: 10px; }
@@ -175,6 +180,21 @@ td strong { color: var(--text); }
 .price-item { display: flex; justify-content: space-between; gap: 10px; padding: 14px 16px; border-radius: 18px; background: var(--surface-strong); border: 1px solid var(--surface-border); }
 .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
 .gallery img { width: 100%; height: 180px; object-fit: cover; border-radius: 18px; border: 1px solid var(--surface-border); background: var(--surface-strong); }
+.media-slider { position: relative; overflow: hidden; border-radius: 20px; border: 1px solid var(--surface-border); background: var(--surface-strong); }
+.media-slider.is-compact { aspect-ratio: 16 / 10; }
+.media-slider.is-feature { aspect-ratio: 16 / 9; }
+.slider-track { position: relative; width: 100%; height: 100%; }
+.slider-slide { display: none; width: 100%; height: 100%; object-fit: cover; background: var(--surface-strong); }
+.slider-slide.is-active { display: block; }
+.media-slider.is-compact .slider-slide { aspect-ratio: 16 / 10; }
+.media-slider.is-feature .slider-slide { aspect-ratio: 16 / 9; }
+.slider-empty { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 220px; color: var(--muted); font-weight: 700; }
+.slider-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 42px; height: 42px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(12, 20, 34, 0.72); color: #fff; font-size: 1.35rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease; }
+.slider-arrow:hover { transform: translateY(-50%) scale(1.04); background: rgba(19, 143, 208, 0.84); border-color: transparent; }
+.slider-arrow.prev { right: 14px; }
+.slider-arrow.next { left: 14px; }
+.slider-count { position: absolute; left: 14px; bottom: 14px; padding: 6px 12px; border-radius: 999px; background: rgba(12, 20, 34, 0.72); color: #fff; font-size: 0.88rem; font-weight: 700; }
+.gallery-section { margin-top: 18px; }
 .catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
 .catalog-card { display: flex; flex-direction: column; gap: 16px; padding: 22px; border-radius: 22px; background: var(--surface-card); border: 1px solid var(--surface-border); box-shadow: var(--shadow-md); }
 .catalog-media { width: 100%; aspect-ratio: 16 / 10; border-radius: 18px; border: 1px solid var(--surface-border); background: var(--surface-strong); object-fit: cover; }
@@ -219,6 +239,9 @@ td strong { color: var(--text); }
 @media (max-width: 700px) {
     .top-strip { align-items: stretch; }
     .public-shell-actions { align-items: stretch; }
+    .account-cluster { width: 100%; }
+    .account-shortcuts { width: 100%; }
+    .shortcut-pill { flex: 1 1 0; }
     .public-site-nav { width: 100%; justify-content: space-between; overflow-x: auto; }
     .admin-topbar { justify-content: stretch; }
     .user-chip-profile { width: 100%; }
@@ -232,6 +255,47 @@ td strong { color: var(--text); }
     .admin-hero { padding: 24px 22px 30px; }
 }
 </style>
+"""
+
+PORTAL_SCRIPT = """
+<script>
+(() => {
+    const syncSlider = (slider, index) => {
+        const slides = Array.from(slider.querySelectorAll('[data-slider-slide]'));
+        if (!slides.length) {
+            return;
+        }
+        const total = slides.length;
+        const normalized = ((Number(index) % total) + total) % total;
+        slider.dataset.index = String(normalized);
+        slides.forEach((slide, slideIndex) => {
+            slide.classList.toggle('is-active', slideIndex === normalized);
+        });
+        const counter = slider.querySelector('[data-slider-counter]');
+        if (counter) {
+            counter.textContent = `${normalized + 1}/${total}`;
+        }
+    };
+
+    document.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-slider-step]');
+        if (!button) {
+            return;
+        }
+        const slider = button.closest('[data-slider]');
+        if (!slider) {
+            return;
+        }
+        const currentIndex = Number(slider.dataset.index || '0');
+        const step = Number(button.getAttribute('data-slider-step') || '0');
+        syncSlider(slider, currentIndex + step);
+    });
+
+    document.querySelectorAll('[data-slider]').forEach((slider) => {
+        syncSlider(slider, Number(slider.dataset.index || '0'));
+    });
+})();
+</script>
 """
 
 ORDER_STATUS_LABELS = {
@@ -249,7 +313,7 @@ PAYMENT_METHOD_LABELS = {
 
 
 def _page_response(title: str, body: str) -> web.Response:
-    return admin_html_response(title, PORTAL_STYLE + body)
+    return admin_html_response(title, PORTAL_STYLE + body + PORTAL_SCRIPT)
 
 
 def _theme_mode_from_request(request: web.Request) -> str:
@@ -377,6 +441,16 @@ def _public_nav_html(current_path: str) -> str:
     return '<nav class="public-site-nav">' + ''.join(links) + '</nav>'
 
 
+def _public_account_shortcuts(current_path: str) -> str:
+    items = (("עגלה", "/cart"), ("התראות", "/inbox"))
+    links: list[str] = []
+    for label, href in items:
+        is_active = current_path == href or current_path.startswith(f"{href}/")
+        class_attr = ' class="shortcut-pill is-active"' if is_active else ' class="shortcut-pill"'
+        links.append(f'<a href="{_escape(href)}"{class_attr}>{_escape(label)}</a>')
+    return '<div class="account-shortcuts">' + ''.join(links) + '</div>'
+
+
 def _public_shell(
     session: WebsiteSessionRecord | None,
     *,
@@ -399,20 +473,23 @@ def _public_shell(
         avatar_url = _session_avatar(session)
         avatar_html = f'<img src="{_escape(avatar_url)}" alt="avatar">' if avatar_url else ""
         account_block = f"""
-        <a class="user-chip account-link" href="/profile">
-            {avatar_html}
-            <div>
-                <strong>{_escape(_session_label(session))}</strong><br>
-                <span class="muted mono">{_escape(session.discord_user_id)}</span>
-            </div>
-        </a>
+        <div class="account-cluster">
+            {_public_account_shortcuts(current_path)}
+            <a class="user-chip account-link" href="/profile">
+                {avatar_html}
+                <div>
+                    <strong>{_escape(_session_label(session))}</strong><br>
+                    <span class="muted mono">{_escape(session.discord_user_id)}</span>
+                </div>
+            </a>
+        </div>
         """
     return f"""
     <div class="portal-root" dir="rtl">
         <div class="public-shell-top">
             <div class="public-shell-actions">
-                {_public_nav_html(current_path) if show_nav else ''}
                 {account_block}
+                {_public_nav_html(current_path) if show_nav else ''}
             </div>
             <div class="top-strip">
                 <div class="public-heading">
@@ -507,6 +584,7 @@ async def _send_optional_user_dm(
     title: str,
     body: str,
     link_path: str | None = None,
+    message_override: str | None = None,
 ) -> bool:
     try:
         user = bot.get_user(user_id) or await bot.fetch_user(user_id)
@@ -514,7 +592,10 @@ async def _send_optional_user_dm(
         extra_line = ""
         if link_path:
             extra_line = f"\n{bot.settings.public_base_url}{link_path}"
-        await dm_channel.send(f"**{title}**\n{body}{extra_line}")
+        if message_override is not None:
+            await dm_channel.send(f"{message_override}{extra_line}")
+        else:
+            await dm_channel.send(f"**{title}**\n{body}{extra_line}")
         return True
     except (discord.HTTPException, discord.Forbidden):
         return False
@@ -713,6 +794,46 @@ def _system_image_url(system: SystemRecord) -> str | None:
     return f"/system-images/{system.id}"
 
 
+def _system_gallery_urls(system: SystemRecord, images: list[SystemGalleryImageRecord]) -> list[str]:
+    urls = [f"/system-gallery-images/{image.id}" for image in images]
+    if not urls and system.image_path:
+        urls.append(f"/system-images/{system.id}")
+    return urls
+
+
+def _special_gallery_urls(images: list[SpecialSystemImageRecord]) -> list[str]:
+    return [f"/special-system-images/{image.id}" for image in images]
+
+
+def _custom_order_gallery_urls(images: list[OrderRequestImageRecord]) -> list[str]:
+    return [f"/admin/custom-order-images/{image.id}" for image in images]
+
+
+def _render_image_slider(
+    image_urls: list[str],
+    *,
+    alt_text: str,
+    compact: bool = False,
+    empty_label: str = "אין תמונות תצוגה",
+) -> str:
+    slider_class = "is-compact" if compact else "is-feature"
+    if not image_urls:
+        return f'<div class="media-slider {slider_class}"><div class="slider-empty">{_escape(empty_label)}</div></div>'
+
+    slides = ''.join(
+        f'<img class="slider-slide{" is-active" if index == 0 else ""}" data-slider-slide src="{_escape(image_url)}" alt="{_escape(f"{alt_text} {index + 1}")}">'
+        for index, image_url in enumerate(image_urls)
+    )
+    controls = ''
+    if len(image_urls) > 1:
+        controls = (
+            '<button type="button" class="slider-arrow prev" data-slider-step="-1" aria-label="תמונה קודמת">&#8249;</button>'
+            '<button type="button" class="slider-arrow next" data-slider-step="1" aria-label="תמונה הבאה">&#8250;</button>'
+            f'<div class="slider-count" data-slider-counter>1/{len(image_urls)}</div>'
+        )
+    return f'<div class="media-slider {slider_class}" data-slider data-index="0"><div class="slider-track">{slides}</div>{controls}</div>'
+
+
 def _catalog_badges_for_system(system: SystemRecord) -> str:
     badges: list[str] = []
     if system.website_price:
@@ -726,13 +847,14 @@ def _catalog_badges_for_system(system: SystemRecord) -> str:
     return ''.join(badges)
 
 
-def _render_system_card(system: SystemRecord, *, owned: bool = False, discount_percent: int | None = None) -> str:
-    image_url = _system_image_url(system)
-    image_html = (
-        f'<img class="catalog-media" src="{_escape(image_url)}" alt="{_escape(system.name)}">'
-        if image_url
-        else '<div class="catalog-media catalog-placeholder">אין תמונת תצוגה</div>'
-    )
+def _render_system_card(
+    system: SystemRecord,
+    *,
+    image_urls: list[str] | None = None,
+    owned: bool = False,
+    discount_percent: int | None = None,
+) -> str:
+    image_html = _render_image_slider(image_urls or [], alt_text=system.name, compact=True, empty_label="אין תמונת תצוגה")
     extra_badges: list[str] = []
     if owned:
         extra_badges.append('<span class="catalog-badge">כבר בבעלותך</span>')
@@ -756,11 +878,11 @@ def _render_system_card(system: SystemRecord, *, owned: bool = False, discount_p
     """
 
 
-def _render_special_system_card(special_system: SpecialSystemRecord) -> str:
+def _render_special_system_card(special_system: SpecialSystemRecord, *, image_urls: list[str] | None = None) -> str:
     payment_summary = ', '.join(method.label for method in special_system.payment_methods) or 'לפי תיאום'
     return f"""
     <article class="catalog-card">
-        <div class="catalog-media catalog-placeholder">מערכת מיוחדת</div>
+        {_render_image_slider(image_urls or [], alt_text=special_system.title, compact=True, empty_label="מערכת מיוחדת")}
         <div class="catalog-meta">
             <div>
                 <h2>{_escape(special_system.title)}</h2>
@@ -794,7 +916,7 @@ async def website_home_page(request: web.Request) -> web.Response:
         </div>
     </div>
     <div class="profile-summary-grid">
-        <div class="summary-tile"><strong>{len(systems)}</strong><span>מערכות שמורות</span></div>
+        <div class="summary-tile"><strong>{len(systems)}</strong><span>כמות מערכות שלנו</span></div>
         <div class="summary-tile"><strong>{len(special_systems)}</strong><span>מערכות מיוחדות פעילות</span></div>
         <div class="summary-tile"><strong>{'מחובר' if session else 'לא מחובר'}</strong><span>מצב החשבון באתר</span></div>
     </div>
@@ -893,6 +1015,7 @@ async def website_info_page(request: web.Request) -> web.Response:
 async def public_systems_page(request: web.Request) -> web.Response:
     bot, session = await _require_active_site_session(request)
     systems = await bot.services.systems.list_public_systems()
+    system_images = await asyncio.gather(*(bot.services.systems.list_system_images(system.id) for system in systems)) if systems else []
     owned_ids = {system.id for system in await bot.services.ownership.list_user_systems(session.discord_user_id)}
     discounts = {
         discount.system.id: discount.discount_percent
@@ -900,8 +1023,13 @@ async def public_systems_page(request: web.Request) -> web.Response:
     }
     content = (
         '<div class="catalog-grid">' + ''.join(
-            _render_system_card(system, owned=system.id in owned_ids, discount_percent=discounts.get(system.id))
-            for system in systems
+            _render_system_card(
+                system,
+                image_urls=_system_gallery_urls(system, images),
+                owned=system.id in owned_ids,
+                discount_percent=discounts.get(system.id),
+            )
+            for system, images in zip(systems, system_images, strict=False)
         ) + '</div>'
         if systems
         else '<div class="empty-card"><h2>אין מערכות זמינות כרגע</h2><p>נסו שוב מאוחר יותר.</p></div>'
@@ -922,15 +1050,11 @@ async def public_system_detail_page(request: web.Request) -> web.Response:
     bot, session = await _require_active_site_session(request)
     system = await bot.services.systems.get_system(int(request.match_info["system_id"]))
     owned = await bot.services.ownership.user_owns_system(session.discord_user_id, system.id)
-    if (not system.is_visible_on_website or not system.is_for_sale or not system.is_in_stock) and not owned:
+    if (system.is_special_system or not system.is_visible_on_website or not system.is_for_sale or not system.is_in_stock) and not owned:
         raise NotFoundError("המערכת שביקשת לא זמינה כרגע לרכישה באתר.")
     discount = await bot.services.discounts.get_discount_optional(session.discord_user_id, system.id)
-    image_url = _system_image_url(system)
-    image_html = (
-        f'<img src="{_escape(image_url)}" alt="{_escape(system.name)}">'
-        if image_url
-        else '<div class="catalog-media catalog-placeholder">אין תמונת תצוגה</div>'
-    )
+    image_urls = _system_gallery_urls(system, await bot.services.systems.list_system_images(system.id))
+    image_html = _render_image_slider(image_urls, alt_text=system.name, empty_label="אין תמונת תצוגה")
     robux_url = bot.services.systems.gamepass_url_for_id(system.roblox_gamepass_id)
     actions: list[str] = []
     if owned:
@@ -982,8 +1106,12 @@ async def public_system_detail_page(request: web.Request) -> web.Response:
 async def special_systems_page(request: web.Request) -> web.Response:
     bot, session = await _require_active_site_session(request)
     systems = await bot.services.special_systems.list_special_systems(active_only=True)
+    system_images = await asyncio.gather(*(bot.services.special_systems.list_special_system_images(system.id) for system in systems)) if systems else []
     content = (
-        '<div class="catalog-grid">' + ''.join(_render_special_system_card(system) for system in systems) + '</div>'
+        '<div class="catalog-grid">' + ''.join(
+            _render_special_system_card(system, image_urls=_special_gallery_urls(images))
+            for system, images in zip(systems, system_images, strict=False)
+        ) + '</div>'
         if systems
         else '<div class="empty-card"><h2>אין מערכות מיוחדות פעילות כרגע</h2><p>נסו שוב מאוחר יותר.</p></div>'
     )
@@ -1002,6 +1130,8 @@ async def special_systems_page(request: web.Request) -> web.Response:
 async def website_paypal_purchase_page(request: web.Request) -> web.Response:
     bot, session = await _require_active_site_session(request)
     system = await bot.services.systems.get_system(int(request.match_info["system_id"]))
+    if system.is_special_system:
+        raise NotFoundError("המערכת הזאת זמינה רק דרך עמוד המערכות המיוחדות.")
     if not system.paypal_link:
         raise PermissionDeniedError("למערכת הזאת אין כרגע קישור פייפאל פעיל.")
     purchase = await bot.services.payments.create_purchase(session.discord_user_id, system.id, system.paypal_link)
@@ -1438,19 +1568,7 @@ async def website_inbox_page(request: web.Request) -> web.Response:
 
 async def website_profile_page(request: web.Request) -> web.Response:
     bot, session = await _require_active_site_session(request)
-    if request.method == "POST":
-        form = await request.post()
-        action = str(form.get("action", "")).strip()
-        if action == "save-theme":
-            theme_mode = str(form.get("theme_mode", "default")).strip().lower()
-            if theme_mode not in THEME_LABELS:
-                raise PermissionDeniedError("מצב התצוגה שנבחר לא תקין.")
-            response = web.HTTPFound("/profile?saved=theme")
-            _set_theme_cookie(response, theme_mode, secure=bot.settings.public_base_url.startswith("https://"))
-            raise response
-
-    notice = "ערכת הנושא עודכנה בהצלחה." if request.query.get("saved") == "theme" else None
-    theme_mode = _theme_mode_from_request(request)
+    notice: str | None = None
     is_admin = await bot.services.admins.is_admin(session.discord_user_id)
     avatar_url = _session_avatar(session)
     avatar_html = f'<img class="profile-avatar" src="{_escape(avatar_url)}" alt="avatar">' if avatar_url else '<div class="profile-avatar"></div>'
@@ -1496,18 +1614,6 @@ async def website_profile_page(request: web.Request) -> web.Response:
                 {roblox_block}
             </div>
         </div>
-        <div class="card stack">
-            <div>
-                <p class="eyebrow">מראה האתר</p>
-                <h2>ערכת נושא</h2>
-                <p class="setting-hint">ההעדפה נשמרת בדפדפן המחובר שלך ומשפיעה על כל האתר.</p>
-            </div>
-            <form method="post" class="settings-list">
-                <input type="hidden" name="action" value="save-theme">
-                <label class="field"><span>מצב תצוגה</span><select name="theme_mode">{_theme_options(theme_mode)}</select></label>
-                <div class="actions"><button type="submit">שמור העדפה</button></div>
-            </form>
-        </div>
     </div>
     <div class="split-grid">
         <div class="card stack">
@@ -1550,13 +1656,18 @@ async def owned_system_download_page(request: web.Request) -> web.StreamResponse
         response = web.Response(body=asset.asset_bytes, content_type=content_type)
         response.headers["Content-Disposition"] = f'attachment; filename="{asset.asset_name}"'
         return response
-    raise NotFoundError("קובץ המערכת לא נמצא כרגע להורדה.")
+    raise web.HTTPNotFound(text="קובץ המערכת לא נמצא כרגע להורדה.")
 
 
 async def system_image_page(request: web.Request) -> web.StreamResponse:
     bot: SalesBot = request.app["bot"]
     system = await bot.services.systems.get_system(int(request.match_info["system_id"]))
     if not system.image_path:
+        images = await bot.services.systems.list_system_images(system.id)
+        if images:
+            image = images[0]
+            content_type = image.content_type or mimetypes.guess_type(image.asset_name)[0] or "application/octet-stream"
+            return web.Response(body=image.asset_bytes, content_type=content_type)
         raise NotFoundError("לא נמצאה תמונת מערכת.")
     asset = await bot.services.systems.get_system_asset(system.id, asset_type=bot.services.systems.IMAGE_ASSET_TYPE)
     stored_path = bot.services.systems.resolve_storage_path(system.image_path)
@@ -1566,6 +1677,16 @@ async def system_image_page(request: web.Request) -> web.StreamResponse:
         content_type = mimetypes.guess_type(asset.asset_name)[0] or "application/octet-stream"
         return web.Response(body=asset.asset_bytes, content_type=content_type)
     raise NotFoundError("לא נמצאה תמונת מערכת.")
+
+
+async def system_gallery_image_page(request: web.Request) -> web.Response:
+    bot: SalesBot = request.app["bot"]
+    try:
+        image = await bot.services.systems.get_system_gallery_image(int(request.match_info["image_id"]))
+        content_type = image.content_type or mimetypes.guess_type(image.asset_name)[0] or "application/octet-stream"
+        return web.Response(body=image.asset_bytes, content_type=content_type)
+    except SalesBotError as exc:
+        return _error_response("תמונת מערכת", str(exc), status=404)
 
 
 async def website_vouches_page(request: web.Request) -> web.Response:
@@ -1594,7 +1715,9 @@ async def website_vouches_page(request: web.Request) -> web.Response:
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
             notice = "הדירוג נמחק בהצלחה."
-    vouches = await bot.services.vouches.list_all_vouches()
+    admin_ids = await bot.services.admins.list_admin_ids()
+    vouch_lists = await asyncio.gather(*(bot.services.vouches.list_vouches(admin_user_id) for admin_user_id in admin_ids))
+    vouches = sorted((vouch for records in vouch_lists for vouch in records), key=lambda record: (record.created_at, record.id), reverse=True)
     cards: list[str] = []
     for vouch in vouches:
         admin_label, author_label = await asyncio.gather(
@@ -1634,7 +1757,10 @@ async def website_vouches_page(request: web.Request) -> web.Response:
 
 
 async def blacklist_appeal_page(request: web.Request) -> web.Response:
-    notice: str | None = None
+    notice_map = {
+        "submitted": "הערעור נשלח בהצלחה לצוות האתר ויופיע עכשיו בפאנל הניהול.",
+    }
+    notice = notice_map.get(str(request.query.get("saved", "")).strip().lower())
     success = True
     bot, session = await _require_site_session(request)
     entry = await _ensure_site_session_allowed(bot, session, allow_blacklisted=True)
@@ -1650,10 +1776,13 @@ async def blacklist_appeal_page(request: web.Request) -> web.Response:
     if linked_account is not None:
         roblox_name = linked_account.roblox_display_name or linked_account.roblox_username or linked_account.roblox_sub or ""
 
+    pending_appeal = await bot.services.blacklist.get_pending_appeal_for_user(session.discord_user_id)
     appeal_reason = ""
     if request.method == "POST":
         try:
             form = await request.post()
+            if pending_appeal is not None:
+                raise PermissionDeniedError("כבר שלחת ערעור שממתין לבדיקה. חכה להחלטת הצוות לפני שליחה נוספת.")
             roblox_name = str(form.get("roblox_name", "")).strip()
             appeal_reason = str(form.get("appeal_reason", "")).strip()
             if not roblox_name or not appeal_reason:
@@ -1664,23 +1793,49 @@ async def blacklist_appeal_page(request: web.Request) -> web.Response:
                 f"שם ברובלוקס: {roblox_name}\nשם בדיסקורד: {discord_name}",
                 appeal_reason,
             )
-            owner = await bot.fetch_user(bot.settings.owner_user_id)
-            owner_dm = owner.dm_channel or await owner.create_dm()
-            embed = discord.Embed(title="בקשת הסרת בלאקליסט חדשה מהאתר", color=discord.Color.orange())
-            embed.add_field(name="משתמש בדיסקורד", value=f"{discord_name}\n{session.discord_user_id}", inline=False)
-            embed.add_field(name="שם ברובלוקס", value=roblox_name, inline=False)
-            embed.add_field(name="סיבה לבלאקליסט", value=entry.reason or "לא נמסרה", inline=False)
-            embed.add_field(name="למה להסיר את הבלאקליסט", value=appeal_reason, inline=False)
-            embed.set_footer(text=f"מספר בקשה: {appeal.id}")
-
-            view = AppealDecisionView(bot, appeal.id, session.discord_user_id)
-            owner_message = await owner_dm.send(embed=embed, view=view)
-            await bot.services.blacklist.set_owner_message(appeal.id, owner_message.id)
-            bot.add_view(view, message_id=owner_message.id)
-            notice = "הערעור נשלח בהצלחה לבעלים."
+            for admin_user_id in dict.fromkeys(await bot.services.admins.list_admin_ids()):
+                await bot.services.notifications.create_notification(
+                    user_id=admin_user_id,
+                    title=f"ערעור בלאקליסט חדש #{appeal.id}",
+                    body=(
+                        f"{discord_name} ({session.discord_user_id}) שלח ערעור חדש. "
+                        "אפשר לפתוח את דף הבלאקליסט באתר כדי לאשר או לדחות אותו."
+                    ),
+                    link_path="/admin/blacklist",
+                    kind="admin-blacklist-appeal",
+                )
+            raise web.HTTPFound("/blacklist-appeal?saved=submitted")
         except SalesBotError as exc:
             notice = str(exc)
             success = False
+            pending_appeal = await bot.services.blacklist.get_pending_appeal_for_user(session.discord_user_id)
+
+    appeal_panel_html = """
+    <form method="post">
+        <div class="grid">
+            <label class="field"><span>מה השם שלך ברובלוקס</span><input type="text" name="roblox_name" value="{roblox_name}" required></label>
+            <label class="field"><span>מה השם שלך בדיסקורד</span><input type="text" value="{discord_name}" disabled></label>
+            <label class="field field-wide"><span>למה אתה חושב שמגיע לך שנוריד לך בלאקליסט?</span><textarea name="appeal_reason" required>{appeal_reason}</textarea></label>
+        </div>
+        <div class="actions"><button type="submit">שלח ערעור</button></div>
+    </form>
+    """.format(
+        roblox_name=_escape(roblox_name),
+        discord_name=_escape(discord_name),
+        appeal_reason=_escape(appeal_reason),
+    )
+    if pending_appeal is not None:
+        appeal_panel_html = f"""
+        <div class="stack">
+            <div class="price-list">
+                <div class="price-item"><strong>סטטוס</strong><span>{_status_badge(pending_appeal.status)}</span></div>
+                <div class="price-item"><strong>נשלח בתאריך</strong><span>{_escape(pending_appeal.submitted_at)}</span></div>
+                <div class="price-item"><strong>הפרטים שנשלחו</strong><span>{_escape(pending_appeal.answer_one)}</span></div>
+                <div class="price-item"><strong>סיבת הערעור</strong><span>{_escape(pending_appeal.answer_two)}</span></div>
+            </div>
+            <p class="muted">יש לך כבר ערעור ממתין. אחרי שהצוות יקבל החלטה, תוכל לשלוח ערעור חדש רק אם יהיה בכך צורך.</p>
+        </div>
+        """
 
     content = f"""
     {_notice_html(notice, success=success)}
@@ -1695,15 +1850,8 @@ async def blacklist_appeal_page(request: web.Request) -> web.Response:
         </div>
         <div class="card">
             <h2>שליחת ערעור</h2>
-            <p class="muted">זהו הדף היחיד שזמין עבורך כרגע באתר. מלא את הפרטים כדי לשלוח ערעור לבעלים.</p>
-            <form method="post">
-                <div class="grid">
-                    <label class="field"><span>מה השם שלך ברובלוקס</span><input type="text" name="roblox_name" value="{_escape(roblox_name)}" required></label>
-                    <label class="field"><span>מה השם שלך בדיסקורד</span><input type="text" value="{_escape(discord_name)}" disabled></label>
-                    <label class="field field-wide"><span>למה אתה חושב שמגיע לך שנוריד לך בלאקליסט?</span><textarea name="appeal_reason" required>{_escape(appeal_reason)}</textarea></label>
-                </div>
-                <div class="actions"><button type="submit">שלח ערעור</button></div>
-            </form>
+            <p class="muted">זהו הדף היחיד שזמין עבורך כרגע באתר. כאן אפשר לשלוח ערעור, והאדמינים יבדקו אותו ישירות מתוך האתר.</p>
+            {appeal_panel_html}
         </div>
     </div>
     """
@@ -1722,6 +1870,152 @@ async def blacklist_appeal_page(request: web.Request) -> web.Response:
 
 def _custom_order_admin_url(bot: "SalesBot", order_id: int) -> str:
     return f"{bot.settings.public_base_url}/admin/custom-orders/{order_id}"
+
+
+async def admin_blacklist_page(request: web.Request) -> web.Response:
+    notice_map = {
+        "added": "המשתמש נוסף לבלאקליסט בהצלחה.",
+        "removed": "המשתמש הוסר מהבלאקליסט.",
+        "appeal-accepted": "הערעור התקבל והמשתמש עודכן.",
+        "appeal-rejected": "הערעור נדחה והמשתמש עודכן.",
+    }
+    try:
+        bot, session = await _require_admin_session(request)
+        if request.method == "POST":
+            form = await request.post()
+            action = str(form.get("action", "")).strip().lower()
+            if action == "add":
+                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                assert user_id is not None
+                reason = str(form.get("reason", "")).strip()
+                if not reason:
+                    raise PermissionDeniedError("חובה להזין סיבה לפני שמכניסים משתמש לבלאקליסט.")
+                display_label = f"{await _discord_user_label(bot, user_id)} - {user_id}"
+                await bot.services.blacklist.add_entry(user_id, display_label, reason, session.discord_user_id)
+                await bot.services.delivery.purge_deliveries(bot, user_id=user_id)
+                raise web.HTTPFound("/admin/blacklist?saved=added")
+            if action == "remove":
+                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                assert user_id is not None
+                await bot.services.blacklist.remove_entry(user_id)
+                raise web.HTTPFound("/admin/blacklist?saved=removed")
+            if action in {"accept-appeal", "reject-appeal"}:
+                appeal_id = _parse_positive_int(form.get("appeal_id"), "מזהה ערעור")
+                assert appeal_id is not None
+                appeal = await bot.services.blacklist.get_appeal(appeal_id)
+                accepted = action == "accept-appeal"
+                if accepted and await bot.services.blacklist.is_blacklisted(appeal.user_id):
+                    await bot.services.blacklist.remove_entry(appeal.user_id)
+                appeal = await bot.services.blacklist.resolve_appeal(
+                    appeal.id,
+                    reviewer_id=session.discord_user_id,
+                    status="accepted" if accepted else "rejected",
+                )
+                title = "הערעור שלך התקבל" if accepted else "הערעור שלך נדחה"
+                body = (
+                    "הצוות קיבל את הערעור שלך והבלאקליסט הוסר מהחשבון שלך."
+                    if accepted
+                    else "הצוות בדק את הערעור שלך והחליט לדחות אותו כרגע."
+                )
+                link_path = "/profile" if accepted else "/blacklist-appeal"
+                await bot.services.notifications.create_notification(
+                    user_id=appeal.user_id,
+                    title=title,
+                    body=body,
+                    link_path=link_path,
+                    kind="blacklist-appeal",
+                    created_by=session.discord_user_id,
+                )
+                await _send_optional_user_dm(bot, user_id=appeal.user_id, title=title, body=body, link_path=link_path)
+                saved_key = "appeal-accepted" if accepted else "appeal-rejected"
+                raise web.HTTPFound(f"/admin/blacklist?saved={saved_key}")
+            raise PermissionDeniedError("הפעולה שנשלחה לעמוד הבלאקליסט לא תקינה.")
+
+        entries, pending_appeals = await asyncio.gather(
+            bot.services.blacklist.list_entries(),
+            bot.services.blacklist.list_pending_appeals(),
+        )
+        entry_map = {entry.user_id: entry for entry in entries}
+        appeal_labels = (
+            await asyncio.gather(*(_discord_user_label(bot, appeal.user_id) for appeal in pending_appeals))
+            if pending_appeals
+            else []
+        )
+        blacklist_rows = "".join(
+            f"""
+            <tr>
+                <td>{_escape(entry.display_label)}<br><span class="mono">{entry.user_id}</span></td>
+                <td>{_escape(entry.reason or 'לא נמסרה')}</td>
+                <td>{_escape(entry.blacklisted_at)}</td>
+                <td>
+                    <form method="post" class="inline-form">
+                        <input type="hidden" name="action" value="remove">
+                        <input type="hidden" name="user_id" value="{entry.user_id}">
+                        <button type="submit" class="ghost-button danger">הסר</button>
+                    </form>
+                </td>
+            </tr>
+            """
+            for entry in entries
+        ) or '<tr><td colspan="4">אין כרגע משתמשים בבלאקליסט.</td></tr>'
+        appeals_html = "".join(
+            f"""
+            <div class="card stack">
+                <div class="price-list">
+                    <div class="price-item"><strong>ערעור #{appeal.id}</strong><span>{_status_badge(appeal.status)}</span></div>
+                    <div class="price-item"><strong>משתמש</strong><span>{_escape(label)}<br><span class="mono">{appeal.user_id}</span></span></div>
+                    <div class="price-item"><strong>סיבת בלאקליסט</strong><span>{_escape(entry_map.get(appeal.user_id).reason if entry_map.get(appeal.user_id) else 'לא נמצאה רשומת בלאקליסט פעילה')}</span></div>
+                    <div class="price-item"><strong>נשלח בתאריך</strong><span>{_escape(appeal.submitted_at)}</span></div>
+                    <div class="price-item"><strong>פרטי המשתמש</strong><span>{_escape(appeal.answer_one)}</span></div>
+                    <div class="price-item"><strong>למה להסיר</strong><span>{_escape(appeal.answer_two)}</span></div>
+                </div>
+                <div class="actions">
+                    <form method="post" class="inline-form"><input type="hidden" name="action" value="accept-appeal"><input type="hidden" name="appeal_id" value="{appeal.id}"><button type="submit">אשר ערעור</button></form>
+                    <form method="post" class="inline-form"><input type="hidden" name="action" value="reject-appeal"><input type="hidden" name="appeal_id" value="{appeal.id}"><button type="submit" class="ghost-button danger">דחה ערעור</button></form>
+                </div>
+            </div>
+            """
+            for appeal, label in zip(pending_appeals, appeal_labels, strict=False)
+        ) or '<div class="empty-card"><p>אין כרגע ערעורים שממתינים לטיפול.</p></div>'
+        notice = notice_map.get(str(request.query.get("saved", "")).strip().lower())
+        content = f"""
+        {_notice_html(notice, success=True)}
+        <div class="profile-summary-grid">
+            <div class="summary-tile"><strong>{len(entries)}</strong><span>משתמשים בבלאקליסט</span></div>
+            <div class="summary-tile"><strong>{len(pending_appeals)}</strong><span>ערעורים ממתינים</span></div>
+        </div>
+        <div class="split-grid">
+            <div class="card stack">
+                <h2>הכנסה לבלאקליסט</h2>
+                <form method="post">
+                    <input type="hidden" name="action" value="add">
+                    <div class="grid">
+                        <label class="field"><span>Discord User ID</span><input type="number" min="1" name="user_id" required></label>
+                        <label class="field field-wide"><span>סיבה</span><textarea name="reason" required></textarea></label>
+                    </div>
+                    <div class="actions"><button type="submit">הכנס לבלאקליסט</button></div>
+                </form>
+            </div>
+            <div class="card stack">
+                <h2>ערעורים ממתינים</h2>
+                <p>כל הערעורים שנשלחו דרך האתר או דרך פקודת הערעור מרוכזים כאן לטיפול ישיר מתוך האתר.</p>
+                {appeals_html}
+            </div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>משתמש</th><th>סיבה</th><th>הוכנס בתאריך</th><th>פעולות</th></tr></thead><tbody>{blacklist_rows}</tbody></table></div>
+        """
+        body = _admin_shell(
+            session,
+            current_path=request.path,
+            title="בלאקליסט וערעורים",
+            intro="ניהול מלא של משתמשי הבלאקליסט ושל ערעורי ההסרה מתוך האתר, בלי מעבר ל-DM של הבוט.",
+            content=content,
+        )
+        return _page_response("בלאקליסט וערעורים", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("בלאקליסט וערעורים", str(exc), status=403)
 
 
 def _special_system_embed(special_system: SpecialSystemRecord) -> discord.Embed:
@@ -1812,6 +2106,7 @@ async def _owner_order_embed(
 
 async def _owner_custom_order_embed(bot: "SalesBot", order: OrderRequestRecord) -> discord.Embed:
     requester_label = await _discord_user_label(bot, order.user_id)
+    image_count = len(await bot.services.orders.list_request_images(order.id))
     embed = discord.Embed(title="יש הזמנה אישית חדשה", color=discord.Color.gold())
     embed.add_field(name="משתמש Discord", value=f"<@{order.user_id}>\n{requester_label}\n{order.user_id}", inline=False)
     embed.add_field(name="מה אתה רוצה להזמין", value=order.requested_item, inline=False)
@@ -1819,6 +2114,8 @@ async def _owner_custom_order_embed(bot: "SalesBot", order: OrderRequestRecord) 
     embed.add_field(name="איך אתה משלם", value=order.payment_method, inline=False)
     embed.add_field(name="כמה אתה מוכן לשלם", value=order.offered_price, inline=False)
     embed.add_field(name="מה השם שלך ברובלוקס", value=order.roblox_username or "לא צוין", inline=False)
+    if image_count:
+        embed.add_field(name="תמונות שצורפו", value=str(image_count), inline=False)
     embed.add_field(name="סטטוס", value=ORDER_STATUS_LABELS.get(order.status, order.status), inline=False)
     if order.admin_reply:
         note_label = "סיבת דחייה" if order.status == "rejected" else "הודעת אדמין"
@@ -1903,6 +2200,44 @@ async def _notify_custom_order_requester(
         await requester.send(message)
     except discord.HTTPException:
         return
+
+
+async def _send_custom_order_to_admins(bot: "SalesBot", order: OrderRequestRecord) -> tuple[int, int | None]:
+    admin_ids = list(dict.fromkeys(await bot.services.admins.list_admin_ids()))
+    image_count = len(await bot.services.orders.list_request_images(order.id))
+    delivered_count = 0
+    owner_message_id: int | None = None
+
+    for admin_id in admin_ids:
+        try:
+            await bot.services.notifications.create_notification(
+                user_id=admin_id,
+                title=f"הזמנה אישית חדשה #{order.id}",
+                body=f"נפתחה הזמנה אישית חדשה מ-{order.user_id}. אפשר לפתוח את הפרטים המלאים דרך דף הניהול.",
+                link_path=f"/admin/custom-orders/{order.id}",
+                kind="admin-custom-order",
+            )
+            admin_user = bot.get_user(admin_id) or await bot.fetch_user(admin_id)
+            admin_dm = admin_user.dm_channel or await admin_user.create_dm()
+            embed = await _owner_custom_order_embed(bot, order)
+            if image_count:
+                embed.description = f"צורפו להזמנה {image_count} תמונות לעיון בדף הניהול."
+            view = discord.ui.View()
+            view.add_item(
+                discord.ui.Button(
+                    label="פתח את ההזמנה באתר",
+                    style=discord.ButtonStyle.link,
+                    url=_custom_order_admin_url(bot, order.id),
+                )
+            )
+            message = await admin_dm.send(content="יש הזמנה אישית חדשה", embed=embed, view=view)
+            delivered_count += 1
+            if admin_id == bot.settings.owner_user_id:
+                owner_message_id = message.id
+        except (discord.HTTPException, SalesBotError):
+            continue
+
+    return delivered_count, owner_message_id
 
 
 async def _send_account_payment_submission_to_admins(
@@ -2150,6 +2485,8 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         (
             admin_ids,
             systems,
+            blacklist_entries,
+            pending_blacklist_appeals,
             pending_custom_orders,
             special_systems,
             rollable_events,
@@ -2157,6 +2494,8 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         ) = await asyncio.gather(
             bot.services.admins.list_admin_ids(),
             bot.services.systems.list_systems(),
+            bot.services.blacklist.list_entries(),
+            bot.services.blacklist.list_pending_appeals(),
             bot.services.orders.list_requests(statuses=("pending",)),
             bot.services.special_systems.list_special_systems(active_only=True),
             bot.services.events.list_rollable_events(),
@@ -2166,6 +2505,8 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         <div class="stat-grid">
             <div class="card"><h2>אדמינים</h2><div class="stat-value">{len(admin_ids)}</div></div>
             <div class="card"><h2>מערכות</h2><div class="stat-value">{len(systems)}</div></div>
+            <div class="card"><h2>בלאקליסט</h2><div class="stat-value">{len(blacklist_entries)}</div></div>
+            <div class="card"><h2>ערעורי בלאקליסט</h2><div class="stat-value">{len(pending_blacklist_appeals)}</div></div>
             <div class="card"><h2>הזמנות אישיות ממתינות</h2><div class="stat-value">{len(pending_custom_orders)}</div></div>
             <div class="card"><h2>מערכות מיוחדות</h2><div class="stat-value">{len(special_systems)}</div></div>
             <div class="card"><h2>אירועים פתוחים</h2><div class="stat-value">{len(rollable_events)}</div></div>
@@ -2175,6 +2516,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         quick_links = """
         <div class="hero-grid">
             <div class="card"><h3>ניהול אדמינים</h3><p>הוספה והסרה של צוות הניהול מתוך האתר.</p><div class="actions"><a class="link-button" href="/admin/admins">פתח</a></div></div>
+            <div class="card"><h3>בלאקליסט וערעורים</h3><p>הכנסה והסרה של משתמשים מהבלאקליסט, יחד עם טיפול מלא בערעורים שנשלחו.</p><div class="actions"><a class="link-button" href="/admin/blacklist">פתח</a></div></div>
             <div class="card"><h3>קופות אתר</h3><p>רשימת כל הזמנות הסל, אישור מסירה, או ביטול עם הודעה חזרה ללקוח.</p><div class="actions"><a class="link-button" href="/admin/checkouts">פתח</a></div></div>
             <div class="card"><h3>הזמנות אישיות</h3><p>רשימת כל ההזמנות האישיות, צפייה בפרטים, אישור, דחייה וסימון כהושלמה.</p><div class="actions"><a class="link-button" href="/admin/custom-orders">פתח</a></div></div>
             <div class="card"><h3>מערכות רגילות</h3><p>יצירת מערכות, עריכה, מחיקה ומתן או הסרה לפי User ID.</p><div class="actions"><a class="link-button" href="/admin/systems">פתח</a></div></div>
@@ -2480,6 +2822,7 @@ async def admin_notifications_page(request: web.Request) -> web.Response:
                     title=notification.title,
                     body=notification.body,
                     link_path=notification.link_path,
+                    message_override="יש לך הודעה חדשה",
                 )
                 label = await _discord_user_label(bot, user_id)
                 notice = f"ההתראה נשלחה אל {label}." + (" נשלח גם DM." if dm_sent else " נשמרה רק במרכז ההתראות באתר.")
@@ -2520,7 +2863,7 @@ async def admin_notifications_page(request: web.Request) -> web.Response:
             </div>
             <div class="card stack">
                 <h2>מה המשתמש רואה</h2>
-                <p>כל התראה שנשלחת כאן נשמרת במרכז ההתראות באתר של המשתמש. אם ה-DM פתוח, תישלח גם הודעה פרטית עם אותו תוכן וקישור ישיר במידת הצורך.</p>
+                <p>כל התראה שנשלחת כאן נשמרת במרכז ההתראות באתר של המשתמש. אם ה-DM פתוח, תישלח בדיסקורד רק הודעה קצרה עם הטקסט "יש לך הודעה חדשה" וקישור ישיר לעמוד הרלוונטי.</p>
             </div>
         </div>
         <div class="stack">{history_html}</div>
@@ -2545,12 +2888,19 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                 file_upload = _extract_file_upload(form.get("file"))
                 if file_upload is None:
                     raise PermissionDeniedError("חובה להעלות קובץ מערכת ראשי.")
-                image_upload = _extract_file_upload(form.get("image"), image_only=True)
+                image_uploads = [
+                    image
+                    for image in (
+                        _extract_file_upload(field, image_only=True)
+                        for field in form.getall("images", [])
+                    )
+                    if image is not None
+                ]
                 created_system = await bot.services.systems.create_system_from_uploads(
                     name=str(form.get("name", "")),
                     description=str(form.get("description", "")),
                     file_upload=(file_upload[0], file_upload[1]),
-                    image_upload=(image_upload[0], image_upload[1]) if image_upload else None,
+                    image_uploads=image_uploads or None,
                     created_by=session.discord_user_id,
                     paypal_link=str(form.get("paypal_link", "")).strip() or None,
                     roblox_gamepass_reference=str(form.get("roblox_gamepass", "")).strip() or None,
@@ -2559,6 +2909,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                     is_visible_on_website=str(form.get("is_visible_on_website", "")).strip().lower() in {"1", "true", "yes", "on"},
                     is_for_sale=str(form.get("is_for_sale", "")).strip().lower() in {"1", "true", "yes", "on"},
                     is_in_stock=str(form.get("is_in_stock", "")).strip().lower() in {"1", "true", "yes", "on"},
+                    is_special_system=str(form.get("is_special_system", "")).strip().lower() in {"1", "true", "yes", "on"},
                 )
                 notice = f"המערכת {created_system.name} נוצרה בהצלחה."
             elif action == "delete":
@@ -2594,6 +2945,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                 <td>{'כן' if system.is_visible_on_website else 'לא'}</td>
                 <td>{'כן' if system.is_for_sale else 'לא'}</td>
                 <td>{'כן' if system.is_in_stock else 'לא'}</td>
+                <td>{'כן' if system.is_special_system else 'לא'}</td>
                 <td>
                     <div class="actions">
                         <a class="link-button ghost-button" href="/admin/systems/{system.id}/edit">עריכה</a>
@@ -2619,10 +2971,11 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                         <label class="field"><span>מחיר באתר</span><input type="text" name="website_price" inputmode="decimal" placeholder="19.99"></label>
                         <label class="field"><span>מטבע</span><input type="text" name="website_currency" maxlength="3" value="USD"></label>
                         <label class="field"><span>קובץ מערכת</span><input type="file" name="file" required></label>
-                        <label class="field"><span>תמונה</span><input type="file" name="image" accept="image/*"></label>
+                        <label class="field"><span>תמונות</span><input type="file" name="images" accept="image/*" multiple></label>
                         <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_visible_on_website" value="true" checked><strong>להציג את המערכת באתר</strong></span></label>
                         <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_for_sale" value="true" checked><strong>להציג את המערכת למכירה</strong></span></label>
                         <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_in_stock" value="true" checked><strong>המערכת במלאי</strong></span></label>
+                        <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_special_system" value="true"><strong>מערכת מיוחדת</strong></span></label>
                     </div>
                     <div class="actions"><button type="submit">צור מערכת</button></div>
                 </form>
@@ -2652,7 +3005,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                 </div>
             </div>
         </div>
-        <div class="table-wrap"><table><thead><tr><th>מערכת</th><th>פייפאל</th><th>גיימפאס</th><th>מחיר</th><th>מוצג באתר</th><th>למכירה</th><th>במלאי</th><th>פעולות</th></tr></thead><tbody>{system_rows}</tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>מערכת</th><th>פייפאל</th><th>גיימפאס</th><th>מחיר</th><th>מוצג באתר</th><th>למכירה</th><th>במלאי</th><th>מיוחדת</th><th>פעולות</th></tr></thead><tbody>{system_rows}</tbody></table></div>
         """
         body = _admin_shell(session, current_path=request.path, title="ניהול מערכות", intro="יצירה, עריכה, מחיקה ומתן/הסרה של מערכות דרך האתר.", content=content)
         return _page_response("ניהול מערכות", body)
@@ -3223,6 +3576,7 @@ async def custom_order_detail_page(request: web.Request) -> web.Response:
                 "complete": "ההזמנה סומנה כהושלמה והלקוח קיבל עדכון ב-DM אם היה אפשר לשלוח.",
             }[action]
 
+        order_images = await bot.services.orders.list_request_images(order.id)
         requester_label = await _discord_user_label(bot, order.user_id)
         reviewer_label = await _discord_user_label(bot, order.reviewed_by) if order.reviewed_by is not None else None
         admin_note_label = ""
@@ -3257,6 +3611,7 @@ async def custom_order_detail_page(request: web.Request) -> web.Response:
                     <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(order.payment_method)}</span></div>
                     <div class="price-item"><strong>הצעת מחיר / תמורה</strong><span>{_escape(order.offered_price)}</span></div>
                     <div class="price-item"><strong>שם Roblox</strong><span>{_escape(order.roblox_username or 'לא צוין')}</span></div>
+                    <div class="price-item"><strong>תמונות שצורפו</strong><span>{len(order_images)}</span></div>
                     <div class="price-item"><strong>נשלח בתאריך</strong><span>{_escape(order.submitted_at)}</span></div>
                     {review_meta}
                 </div>
@@ -3269,6 +3624,7 @@ async def custom_order_detail_page(request: web.Request) -> web.Response:
                 </form>
             </div>
         </div>
+        {f'<div class="card stack gallery-section"><h2>תמונות שצורפו</h2>{_render_image_slider(_custom_order_gallery_urls(order_images), alt_text=f"הזמנה אישית {order.id}", empty_label="לא צורפו תמונות")}</div>' if order_images else ''}
         """
         body = _admin_shell(session, current_path=request.path, title=f"הזמנה אישית #{order.id}", intro="בדיקה, אישור, דחייה, סיום או מחיקה של הזמנה אישית שנשלחה מהאתר.", content=content)
         return _page_response(f"הזמנה אישית #{order.id}", body)
@@ -3285,6 +3641,18 @@ async def special_system_image_page(request: web.Request) -> web.Response:
         return web.Response(body=image.asset_bytes, content_type=image.content_type or "application/octet-stream")
     except SalesBotError as exc:
         return _error_response("תמונת מערכת מיוחדת", str(exc), status=404)
+
+
+async def custom_order_image_page(request: web.Request) -> web.Response:
+    try:
+        bot, _session = await _require_admin_session(request)
+        image = await bot.services.orders.get_request_image(int(request.match_info["image_id"]))
+        content_type = image.content_type or mimetypes.guess_type(image.asset_name)[0] or "application/octet-stream"
+        return web.Response(body=image.asset_bytes, content_type=content_type)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("תמונת הזמנה אישית", str(exc), status=404)
 
 
 async def custom_orders_page(request: web.Request) -> web.Response:
@@ -3310,6 +3678,14 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                 selected_payment_method = str(form.get("payment_method", "")).strip()
                 offered_price = str(form.get("offered_price", "")).strip()
                 roblox_username = str(form.get("roblox_username", "")).strip()
+                uploaded_images = [
+                    image
+                    for image in (
+                        _extract_file_upload(field, image_only=True)
+                        for field in form.getall("images", [])
+                    )
+                    if image is not None
+                ]
                 if not requested_item or not required_timeframe or not selected_payment_method or not offered_price or not roblox_username:
                     raise PermissionDeniedError("חובה למלא את כל השדות בטופס ההזמנה.")
 
@@ -3320,28 +3696,17 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                     payment_method=selected_payment_method,
                     offered_price=offered_price,
                     roblox_username=roblox_username,
+                    images=uploaded_images,
                 )
-
-                try:
-                    owner = await bot.fetch_user(bot.settings.owner_user_id)
-                    owner_dm = owner.dm_channel or await owner.create_dm()
-                    owner_embed = await _owner_custom_order_embed(bot, order)
-                    view = discord.ui.View()
-                    view.add_item(
-                        discord.ui.Button(
-                            label="פתח את ההזמנה באתר",
-                            style=discord.ButtonStyle.link,
-                            url=_custom_order_admin_url(bot, order.id),
-                        )
-                    )
-                    owner_message = await owner_dm.send(content="יש הזמנה אישית חדשה", embed=owner_embed, view=view)
-                except discord.HTTPException as exc:
-                    raise ExternalServiceError("לא הצלחתי לשלוח את ההזמנה לבעלים ב-DM.") from exc
-                await bot.services.orders.set_owner_message(order.id, owner_message.id)
+                delivered_count, owner_message_id = await _send_custom_order_to_admins(bot, order)
+                if owner_message_id is not None:
+                    await bot.services.orders.set_owner_message(order.id, owner_message_id)
+                if delivered_count <= 0:
+                    LOGGER.warning("Custom order %s was saved but no admin DM could be delivered", order.id)
 
                 success_html = """
                 <div class="card stack">
-                    <div><h2>ההזמנה נשלחה</h2><p>שלחנו לבעלים את כל הפרטים, וההזמנה מחכה עכשיו ברשימת האדמין באתר.</p></div>
+                    <div><h2>ההזמנה נשלחה</h2><p>ההזמנה נשמרה ונשלחה לכל האדמינים שניתן היה להגיע אליהם. היא מחכה עכשיו ברשימת האדמין באתר.</p></div>
                     <div class="actions"><a class="link-button" href="/custom-orders">שלח הזמנה נוספת</a></div>
                 </div>
                 """
@@ -3349,7 +3714,7 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                     session,
                     current_path="/custom-orders",
                     title="הזמנה אישית",
-                    intro="ההזמנה שלך נשמרה ונשלחה לבעלים.",
+                    intro="ההזמנה שלך נשמרה ונשלחה לאדמינים.",
                     login_path="/custom-orders",
                     section_label="הזמנות אישיות",
                     content=_notice_html("ההזמנה נשלחה בהצלחה. נחזור אליך ב-DM אחרי שנבדוק אותה.", success=True) + success_html,
@@ -3379,13 +3744,14 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                 <h2>טופס הזמנה אישית</h2>
                 <p class="muted">כל השדות חובה. שם ה-Discord שלך נלקח אוטומטית מההתחברות לאתר.</p>
                 {connected_account_html}
-                <form method="post">
+                <form method="post" enctype="multipart/form-data">
                     <div class="grid">
                         <label class="field field-wide"><span>מה אתה רוצה להזמין</span><textarea name="requested_item" required>{_escape(requested_item)}</textarea></label>
                         <label class="field"><span>תוך כמה זמן אתה צריך את זה</span><input type="text" name="required_timeframe" value="{_escape(required_timeframe)}" required></label>
                         <label class="field"><span>איך אתה משלם</span><select name="payment_method" required>{_order_payment_method_select_options(bot.services.orders, selected_payment_method)}</select></label>
                         <label class="field field-wide"><span>כמה אתה מוכן לשלם (או מה אתה מביא אם זה דברים במשחק)</span><textarea name="offered_price" required>{_escape(offered_price)}</textarea></label>
                         <label class="field"><span>מה השם שלך ברובלוקס</span><input type="text" name="roblox_username" value="{_escape(roblox_username)}" required></label>
+                        <label class="field field-wide"><span>תמונות לעיון האדמינים</span><input type="file" name="images" accept="image/*" multiple></label>
                     </div>
                     <div class="actions"><button type="submit">שלח הזמנה</button></div>
                 </form>
@@ -3602,7 +3968,7 @@ async def special_system_page(request: web.Request) -> web.Response:
             return _page_response(f"הזמנה מיוחדת - {special_system.title}", body)
         gallery_html = ""
         if images:
-            gallery_html = '<div class="gallery">' + "".join(f'<img src="/special-system-images/{image.id}" alt="{_escape(image.asset_name)}">' for image in images) + "</div>"
+            gallery_html = f'<div class="card stack gallery-section"><h2>תמונות המערכת</h2>{_render_image_slider(_special_gallery_urls(images), alt_text=special_system.title, empty_label="אין כרגע תמונות תצוגה")}</div>'
         linked_label = "לא מחובר"
         if linked_account is not None:
             linked_label = " | ".join(part for part in (linked_account.roblox_display_name, linked_account.roblox_username, linked_account.roblox_sub) if part)
@@ -3612,7 +3978,6 @@ async def special_system_page(request: web.Request) -> web.Response:
             <div class="card stack">
                 <div><h2>{_escape(special_system.title)}</h2><p>{_escape(special_system.description)}</p></div>
                 <div><h3>אמצעי תשלום</h3><div class="price-list">{''.join(f'<div class="price-item"><strong>{_escape(method.label)}</strong><span>{_escape(method.price)}</span></div>' for method in special_system.payment_methods)}</div></div>
-                {gallery_html}
             </div>
             <div class="card">
                 <h2>טופס הזמנה</h2>
@@ -3628,6 +3993,7 @@ async def special_system_page(request: web.Request) -> web.Response:
                 </form>
             </div>
         </div>
+        {gallery_html}
         """
         body = _public_shell(
             session,

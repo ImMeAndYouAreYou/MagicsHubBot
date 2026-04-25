@@ -12,7 +12,7 @@ import discord
 
 from sales_bot.db import Database
 from sales_bot.exceptions import AlreadyExistsError, NotFoundError, PermissionDeniedError
-from sales_bot.models import SystemAssetRecord, SystemRecord
+from sales_bot.models import SystemAssetRecord, SystemGalleryImageRecord, SystemRecord
 from sales_bot.storage import remove_path, save_named_bytes, slugify
 
 
@@ -40,16 +40,17 @@ class SystemService:
         is_in_stock: bool = True,
         website_price: str | None = None,
         website_currency: str = "USD",
+        is_special_system: bool = False,
     ) -> SystemRecord:
         file_bytes = await file_attachment.read()
-        image_upload: tuple[str, bytes] | None = None
+        image_uploads: list[tuple[str, bytes, str | None]] = []
         if image_attachment is not None:
-            image_upload = (image_attachment.filename, await image_attachment.read())
+            image_uploads.append((image_attachment.filename, await image_attachment.read(), image_attachment.content_type))
         return await self.create_system_from_uploads(
             name=name,
             description=description,
             file_upload=(file_attachment.filename, file_bytes),
-            image_upload=image_upload,
+            image_uploads=image_uploads or None,
             created_by=created_by,
             paypal_link=paypal_link,
             roblox_gamepass_reference=roblox_gamepass_reference,
@@ -58,6 +59,7 @@ class SystemService:
             is_in_stock=is_in_stock,
             website_price=website_price,
             website_currency=website_currency,
+            is_special_system=is_special_system,
         )
 
     async def create_system_from_uploads(
@@ -66,7 +68,8 @@ class SystemService:
         name: str,
         description: str,
         file_upload: tuple[str, bytes],
-        image_upload: tuple[str, bytes] | None,
+        image_upload: tuple[str, bytes] | None = None,
+        image_uploads: list[tuple[str, bytes, str | None]] | None = None,
         created_by: int,
         paypal_link: str | None,
         roblox_gamepass_reference: str | None,
@@ -75,16 +78,21 @@ class SystemService:
         is_in_stock: bool = True,
         website_price: str | None = None,
         website_currency: str = "USD",
+        is_special_system: bool = False,
     ) -> SystemRecord:
         folder = self.storage_root / f"{slugify(name)}-{uuid4().hex[:12]}"
         file_name, file_bytes = file_upload
         file_path = save_named_bytes(file_name, file_bytes, folder)
         safe_file_name = Path(file_name).name or file_path.name
+        normalized_image_uploads = list(image_uploads or [])
+        if image_upload is not None and not normalized_image_uploads:
+            normalized_image_uploads.append((image_upload[0], image_upload[1], None))
         image_bytes: bytes | None = None
+        image_content_type: str | None = None
         image_path: Path | None = None
         safe_image_name: str | None = None
-        if image_upload is not None:
-            image_name, image_bytes = image_upload
+        if normalized_image_uploads:
+            image_name, image_bytes, image_content_type = normalized_image_uploads[0]
             image_path = save_named_bytes(image_name, image_bytes, folder)
             safe_image_name = Path(image_name).name or image_path.name
 
@@ -109,9 +117,10 @@ class SystemService:
                     is_in_stock,
                     website_price,
                     website_currency,
+                    is_special_system,
                     created_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     name.strip(),
@@ -125,6 +134,7 @@ class SystemService:
                     is_in_stock,
                     normalized_website_price,
                     normalized_website_currency,
+                    is_special_system,
                     created_by,
                 ),
             )
@@ -148,6 +158,8 @@ class SystemService:
                     asset_name=safe_image_name,
                     asset_bytes=image_bytes,
                 )
+            if normalized_image_uploads:
+                await self._replace_system_gallery_images(system_id, normalized_image_uploads)
         except Exception:
             if system_id is not None:
                 await self.database.execute("DELETE FROM systems WHERE id = ?", (system_id,))
@@ -184,6 +196,7 @@ class SystemService:
             WHERE COALESCE(is_visible_on_website, TRUE)
               AND COALESCE(is_for_sale, TRUE)
               AND COALESCE(is_in_stock, TRUE)
+                            AND NOT COALESCE(is_special_system, FALSE)
             ORDER BY LOWER(name) ASC
             """
         )
@@ -238,8 +251,11 @@ class SystemService:
         is_in_stock: bool | None = None,
         website_price: str | None = None,
         website_currency: str | None = None,
+        is_special_system: bool | None = None,
         file_upload: tuple[str, bytes] | None = None,
         image_upload: tuple[str, bytes] | None = None,
+        image_uploads: list[tuple[str, bytes, str | None]] | None = None,
+        replace_images: bool = False,
         clear_image: bool = False,
     ) -> SystemRecord:
         current = await self.get_system(system_id)
@@ -250,6 +266,10 @@ class SystemService:
         next_image_path = self._serialize_storage_path(current.image_path) if current.image_path else None
         new_file_path: Path | None = None
         new_image_path: Path | None = None
+        normalized_image_uploads = list(image_uploads or [])
+        if image_upload is not None and not normalized_image_uploads:
+            normalized_image_uploads.append((image_upload[0], image_upload[1], None))
+        primary_image_upload = normalized_image_uploads[0] if normalized_image_uploads else None
 
         if file_upload is not None:
             filename, data = file_upload
@@ -259,8 +279,8 @@ class SystemService:
         if clear_image:
             next_image_path = None
 
-        if image_upload is not None:
-            filename, data = image_upload
+        if primary_image_upload is not None and (replace_images or current.image_path is None):
+            filename, data, _content_type = primary_image_upload
             new_image_path = save_named_bytes(filename, data, folder)
             next_image_path = self._serialize_storage_path(new_image_path) or str(new_image_path)
 
@@ -274,6 +294,7 @@ class SystemService:
         next_website_currency = (
             current.website_currency if website_currency is None else self.normalize_website_currency(website_currency)
         )
+        next_is_special_system = current.is_special_system if is_special_system is None else is_special_system
 
         try:
             await self.database.execute(
@@ -289,7 +310,8 @@ class SystemService:
                     is_for_sale = ?,
                     is_in_stock = ?,
                     website_price = ?,
-                    website_currency = ?
+                    website_currency = ?,
+                    is_special_system = ?
                 WHERE id = ?
                 """,
                 (
@@ -304,6 +326,7 @@ class SystemService:
                     next_is_in_stock,
                     next_website_price,
                     next_website_currency,
+                    next_is_special_system,
                     system_id,
                 ),
             )
@@ -322,14 +345,20 @@ class SystemService:
             )
         if clear_image:
             await self._delete_system_asset(system_id, asset_type=self.IMAGE_ASSET_TYPE)
-        if image_upload is not None:
-            image_name, image_bytes = image_upload
+            await self.database.execute("DELETE FROM system_gallery_images WHERE system_id = ?", (system_id,))
+        if primary_image_upload is not None and (replace_images or current.image_path is None):
+            image_name, image_bytes, _content_type = primary_image_upload
             await self._upsert_system_asset(
                 system_id,
                 asset_type=self.IMAGE_ASSET_TYPE,
                 asset_name=Path(image_name).name or Path(next_image_path or "image.bin").name,
                 asset_bytes=image_bytes,
             )
+        if normalized_image_uploads:
+            if replace_images:
+                await self._replace_system_gallery_images(system_id, normalized_image_uploads)
+            else:
+                await self._append_system_gallery_images(system_id, normalized_image_uploads)
 
         if new_file_path is not None and current.file_path != str(new_file_path):
             self._remove_stored_path(current.file_path)
@@ -339,6 +368,21 @@ class SystemService:
             self._remove_stored_path(current.image_path)
 
         return await self.get_system(system_id)
+
+    async def list_system_images(self, system_id: int) -> list[SystemGalleryImageRecord]:
+        system = await self.get_system(system_id)
+        await self._ensure_system_gallery_backfilled(system)
+        rows = await self.database.fetchall(
+            "SELECT * FROM system_gallery_images WHERE system_id = ? ORDER BY sort_order ASC, id ASC",
+            (system_id,),
+        )
+        return [self._map_gallery_image(row) for row in rows]
+
+    async def get_system_gallery_image(self, image_id: int) -> SystemGalleryImageRecord:
+        row = await self.database.fetchone("SELECT * FROM system_gallery_images WHERE id = ?", (image_id,))
+        if row is None:
+            raise NotFoundError("תמונת מערכת לא נמצאה.")
+        return self._map_gallery_image(row)
 
     async def build_delivery_file(self, system: SystemRecord) -> discord.File:
         asset = await self.get_system_asset(system.id, asset_type=self.FILE_ASSET_TYPE)
@@ -574,6 +618,80 @@ class SystemService:
                 asset_bytes=image_path.read_bytes(),
             )
 
+    async def _ensure_system_gallery_backfilled(self, system: SystemRecord) -> None:
+        row = await self.database.fetchone(
+            "SELECT id FROM system_gallery_images WHERE system_id = ? LIMIT 1",
+            (system.id,),
+        )
+        if row is not None or not system.image_path:
+            return
+
+        asset = await self.get_system_asset(system.id, asset_type=self.IMAGE_ASSET_TYPE)
+        asset_name: str | None = None
+        asset_bytes: bytes | None = None
+        content_type: str | None = None
+        if asset is not None:
+            asset_name = asset.asset_name
+            asset_bytes = asset.asset_bytes
+            content_type = mimetypes.guess_type(asset.asset_name)[0] or None
+        else:
+            stored_path = self.resolve_storage_path(system.image_path)
+            if stored_path is not None and stored_path.is_file():
+                asset_name = stored_path.name
+                asset_bytes = stored_path.read_bytes()
+                content_type = mimetypes.guess_type(stored_path.name)[0] or None
+
+        if asset_name is None or asset_bytes is None:
+            return
+
+        await self.database.execute(
+            """
+            INSERT INTO system_gallery_images (system_id, asset_name, content_type, asset_bytes, sort_order)
+            VALUES (?, ?, ?, ?, 0)
+            """,
+            (system.id, asset_name, content_type, asset_bytes),
+        )
+
+    async def _replace_system_gallery_images(
+        self,
+        system_id: int,
+        images: list[tuple[str, bytes, str | None]],
+    ) -> None:
+        await self.database.execute("DELETE FROM system_gallery_images WHERE system_id = ?", (system_id,))
+        await self.database.executemany(
+            """
+            INSERT INTO system_gallery_images (system_id, asset_name, content_type, asset_bytes, sort_order)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (system_id, Path(asset_name).name or f"image-{index + 1}", content_type, asset_bytes, index)
+                for index, (asset_name, asset_bytes, content_type) in enumerate(images)
+            ],
+        )
+
+    async def _append_system_gallery_images(
+        self,
+        system_id: int,
+        images: list[tuple[str, bytes, str | None]],
+    ) -> None:
+        system = await self.get_system(system_id)
+        await self._ensure_system_gallery_backfilled(system)
+        existing_rows = await self.database.fetchall(
+            "SELECT sort_order FROM system_gallery_images WHERE system_id = ? ORDER BY sort_order ASC, id ASC",
+            (system_id,),
+        )
+        start_index = len(existing_rows)
+        await self.database.executemany(
+            """
+            INSERT INTO system_gallery_images (system_id, asset_name, content_type, asset_bytes, sort_order)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (system_id, Path(asset_name).name or f"image-{start_index + index + 1}", content_type, asset_bytes, start_index + index)
+                for index, (asset_name, asset_bytes, content_type) in enumerate(images)
+            ],
+        )
+
     async def _upsert_system_asset(
         self,
         system_id: int,
@@ -718,6 +836,18 @@ class SystemService:
         return path_value.startswith("/") or bool(re.match(r"^[A-Za-z]:/", path_value))
 
     @staticmethod
+    def _map_gallery_image(row: aiosqlite.Row) -> SystemGalleryImageRecord:
+        return SystemGalleryImageRecord(
+            id=int(row["id"]),
+            system_id=int(row["system_id"]),
+            asset_name=str(row["asset_name"]),
+            content_type=str(row["content_type"]) if row["content_type"] else None,
+            asset_bytes=bytes(row["asset_bytes"]),
+            sort_order=int(row["sort_order"]),
+            created_at=str(row["created_at"]),
+        )
+
+    @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:
         row_keys = set(row.keys())
         return SystemRecord(
@@ -733,6 +863,7 @@ class SystemService:
             is_in_stock=bool(row["is_in_stock"]) if "is_in_stock" in row_keys else True,
             website_price=(str(row["website_price"]) if "website_price" in row_keys and row["website_price"] else None),
             website_currency=(str(row["website_currency"]).upper() if "website_currency" in row_keys and row["website_currency"] else "USD"),
+            is_special_system=bool(row["is_special_system"]) if "is_special_system" in row_keys else False,
             created_by=int(row["created_by"]) if row["created_by"] is not None else None,
             created_at=str(row["created_at"]),
         )

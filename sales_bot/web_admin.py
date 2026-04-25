@@ -939,6 +939,8 @@ def _system_values_from_record(system: Any) -> dict[str, Any]:
         "is_visible_on_website": system.is_visible_on_website,
         "is_for_sale": system.is_for_sale,
         "is_in_stock": system.is_in_stock,
+        "is_special_system": getattr(system, "is_special_system", False),
+        "replace_images": False,
         "clear_image": False,
     }
 
@@ -954,6 +956,8 @@ def _extract_system_form_values(post_data: Any) -> dict[str, Any]:
         "is_visible_on_website": str(post_data.get("is_visible_on_website", "")).lower() in {"1", "true", "yes", "on"},
         "is_for_sale": str(post_data.get("is_for_sale", "")).lower() in {"1", "true", "yes", "on"},
         "is_in_stock": str(post_data.get("is_in_stock", "")).lower() in {"1", "true", "yes", "on"},
+        "is_special_system": str(post_data.get("is_special_system", "")).lower() in {"1", "true", "yes", "on"},
+        "replace_images": str(post_data.get("replace_images", "")).lower() in {"1", "true", "yes", "on"},
         "clear_image": str(post_data.get("clear_image", "")).lower() in {"1", "true", "yes", "on"},
     }
 
@@ -967,6 +971,20 @@ def _extract_upload(field: Any) -> tuple[str, bytes] | None:
     return field.filename, payload
 
 
+def _extract_uploads(fields: list[Any], *, image_only: bool = False) -> list[tuple[str, bytes, str | None]]:
+    uploads: list[tuple[str, bytes, str | None]] = []
+    for field in fields:
+        if not isinstance(field, web.FileField) or not field.filename:
+            continue
+        if image_only and field.content_type and not field.content_type.startswith("image/"):
+            raise PermissionDeniedError("The uploaded image must be a valid image file.")
+        payload = field.file.read()
+        if not payload:
+            continue
+        uploads.append((field.filename, payload, field.content_type))
+    return uploads
+
+
 def _render_system_form(
     *,
     system: Any,
@@ -974,11 +992,11 @@ def _render_system_form(
     error_text: str | None = None,
 ) -> str:
     error_html = f'<div class="notice">{_escape(error_text)}</div>' if error_text else ""
-    current_image = f"<p>תמונה נוכחית: {_escape(system.image_path)}</p>" if system.image_path else "<p>אין כרגע תמונה שמורה.</p>"
+    current_image = f"<p>תמונה ראשית נוכחית: {_escape(system.image_path)}</p>" if system.image_path else "<p>אין כרגע תמונה שמורה.</p>"
     return f"""
     <p class="eyebrow">פאנל מערכות</p>
     <h1>עריכת מערכת #{_escape(system.id)}</h1>
-    <p>אפשר לעדכן כאן את הטקסט, ההעלאות והגדרות החשיפה של המערכת באתר.</p>
+    <p>אפשר לעדכן כאן את הטקסט, ההעלאות, גלריית התמונות והגדרות החשיפה של המערכת באתר.</p>
     {error_html}
     <div class="meta-card">
         <p><strong>קובץ נוכחי:</strong> {_escape(system.file_path)}</p>
@@ -1015,8 +1033,8 @@ def _render_system_form(
                 <input type="file" name="file">
             </label>
             <label class="field">
-                <span>החלפת תמונה</span>
-                <input type="file" name="image" accept="image/*">
+                <span>הוספת תמונות לגלריה</span>
+                <input type="file" name="images" accept="image/*" multiple>
             </label>
             <label class="meta-card check-card">
                 <span class="check-line">
@@ -1036,10 +1054,22 @@ def _render_system_form(
                     <strong>המערכת במלאי</strong>
                 </span>
             </label>
+            <label class="meta-card check-card">
+                <span class="check-line">
+                    <input type="checkbox" name="is_special_system" value="true"{' checked' if values['is_special_system'] else ''}>
+                    <strong>מערכת מיוחדת</strong>
+                </span>
+            </label>
+            <label class="meta-card check-card">
+                <span class="check-line">
+                    <input type="checkbox" name="replace_images" value="true"{' checked' if values['replace_images'] else ''}>
+                    <strong>להחליף את כל גלריית התמונות הקיימת</strong>
+                </span>
+            </label>
             <label class="field field-wide">
                 <span>
                     <input type="checkbox" name="clear_image" value="true"{' checked' if values['clear_image'] else ''}>
-                    למחוק לגמרי את התמונה השמורה
+                    למחוק לגמרי את כל תמונות המערכת
                 </span>
             </label>
         </div>
@@ -1097,9 +1127,7 @@ async def system_edit_page(request: web.Request) -> web.Response:
             form_data = await request.post()
             values = _extract_system_form_values(form_data)
             try:
-                image_field = form_data.get("image")
-                if isinstance(image_field, web.FileField) and image_field.content_type and not image_field.content_type.startswith("image/"):
-                    raise PermissionDeniedError("The uploaded image must be a valid image file.")
+                image_uploads = _extract_uploads(list(form_data.getall("images", [])), image_only=True)
 
                 updated_system = await bot.services.systems.update_system(
                     system_id,
@@ -1112,8 +1140,10 @@ async def system_edit_page(request: web.Request) -> web.Response:
                     is_visible_on_website=bool(values["is_visible_on_website"]),
                     is_for_sale=bool(values["is_for_sale"]),
                     is_in_stock=bool(values["is_in_stock"]),
+                    is_special_system=bool(values["is_special_system"]),
                     file_upload=_extract_upload(form_data.get("file")),
-                    image_upload=_extract_upload(image_field),
+                    image_uploads=image_uploads,
+                    replace_images=bool(values["replace_images"]),
                     clear_image=bool(values["clear_image"]),
                 )
                 return admin_html_response(

@@ -79,6 +79,16 @@ class BlacklistService:
         )
         return [self._map_appeal(row) for row in rows]
 
+    async def get_pending_appeal_for_user(self, user_id: int) -> AppealRecord | None:
+        await self.cleanup_resolved_appeals()
+        row = await self.database.fetchone(
+            "SELECT * FROM blacklist_appeals WHERE user_id = ? AND status = 'pending' ORDER BY submitted_at DESC LIMIT 1",
+            (user_id,),
+        )
+        if row is None:
+            return None
+        return self._map_appeal(row)
+
     async def set_owner_message(self, appeal_id: int, message_id: int) -> None:
         await self.database.execute(
             "UPDATE blacklist_appeals SET owner_message_id = ? WHERE id = ?",

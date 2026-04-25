@@ -59,6 +59,7 @@ class Database:
         await self._ensure_column("systems", "is_in_stock", "BOOLEAN NOT NULL DEFAULT TRUE")
         await self._ensure_column("systems", "website_price", "TEXT")
         await self._ensure_column("systems", "website_currency", "TEXT NOT NULL DEFAULT 'USD'")
+        await self._ensure_column("systems", "is_special_system", "BOOLEAN NOT NULL DEFAULT FALSE")
         await self._ensure_column("blacklist_entries", "reason", "TEXT NOT NULL DEFAULT ''")
         await self._ensure_column("order_requests", "roblox_username", "TEXT")
         await self._ensure_column("order_requests", "admin_reply", "TEXT")

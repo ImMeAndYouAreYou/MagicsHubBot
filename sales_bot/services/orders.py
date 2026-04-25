@@ -4,7 +4,7 @@ import aiosqlite
 
 from sales_bot.db import Database
 from sales_bot.exceptions import NotFoundError, PermissionDeniedError
-from sales_bot.models import OrderRequestRecord
+from sales_bot.models import OrderRequestImageRecord, OrderRequestRecord
 
 
 class OrderService:
@@ -36,6 +36,7 @@ class OrderService:
         payment_method: str,
         offered_price: str,
         roblox_username: str,
+        images: list[tuple[str, bytes, str | None]] | None = None,
     ) -> OrderRequestRecord:
         payment_method_label = self._normalize_payment_method(payment_method)
         order_id = await self.database.insert(
@@ -59,6 +60,18 @@ class OrderService:
                 roblox_username.strip(),
             ),
         )
+        normalized_images = list(images or [])
+        if normalized_images:
+            await self.database.executemany(
+                """
+                INSERT INTO order_request_images (order_id, asset_name, content_type, asset_bytes, sort_order)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (order_id, asset_name, content_type, asset_bytes, index)
+                    for index, (asset_name, asset_bytes, content_type) in enumerate(normalized_images)
+                ],
+            )
         return await self.get_request(order_id)
 
     async def get_request(self, order_id: int) -> OrderRequestRecord:
@@ -83,6 +96,19 @@ class OrderService:
         query += " ORDER BY submitted_at DESC, id DESC"
         rows = await self.database.fetchall(query, parameters)
         return [self._map_order(row) for row in rows]
+
+    async def list_request_images(self, order_id: int) -> list[OrderRequestImageRecord]:
+        rows = await self.database.fetchall(
+            "SELECT * FROM order_request_images WHERE order_id = ? ORDER BY sort_order ASC, id ASC",
+            (order_id,),
+        )
+        return [self._map_image(row) for row in rows]
+
+    async def get_request_image(self, image_id: int) -> OrderRequestImageRecord:
+        row = await self.database.fetchone("SELECT * FROM order_request_images WHERE id = ?", (image_id,))
+        if row is None:
+            raise NotFoundError("תמונת ההזמנה האישית לא נמצאה.")
+        return self._map_image(row)
 
     async def set_owner_message(self, order_id: int, message_id: int) -> None:
         await self.database.execute(
@@ -152,4 +178,16 @@ class OrderService:
             submitted_at=str(row["submitted_at"]),
             reviewed_at=str(row["reviewed_at"]) if row["reviewed_at"] else None,
             reviewed_by=int(row["reviewed_by"]) if row["reviewed_by"] is not None else None,
+        )
+
+    @staticmethod
+    def _map_image(row: aiosqlite.Row) -> OrderRequestImageRecord:
+        return OrderRequestImageRecord(
+            id=int(row["id"]),
+            order_id=int(row["order_id"]),
+            asset_name=str(row["asset_name"]),
+            content_type=str(row["content_type"]) if row["content_type"] else None,
+            asset_bytes=bytes(row["asset_bytes"]),
+            sort_order=int(row["sort_order"]),
+            created_at=str(row["created_at"]),
         )

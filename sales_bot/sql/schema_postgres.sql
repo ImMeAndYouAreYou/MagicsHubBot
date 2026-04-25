@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS systems (
     is_in_stock BOOLEAN NOT NULL DEFAULT TRUE,
     website_price NUMERIC(12, 2),
     website_currency TEXT NOT NULL DEFAULT 'USD',
+    is_special_system BOOLEAN NOT NULL DEFAULT FALSE,
     created_by BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -34,6 +35,16 @@ CREATE TABLE IF NOT EXISTS system_assets (
     asset_bytes BYTEA NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (system_id, asset_type)
+);
+
+CREATE TABLE IF NOT EXISTS system_gallery_images (
+    id BIGSERIAL PRIMARY KEY,
+    system_id BIGINT NOT NULL REFERENCES systems(id) ON DELETE CASCADE,
+    asset_name TEXT NOT NULL,
+    content_type TEXT,
+    asset_bytes BYTEA NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS user_systems (
@@ -181,6 +192,16 @@ CREATE TABLE IF NOT EXISTS order_requests (
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     reviewed_at TIMESTAMPTZ,
     reviewed_by BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS order_request_images (
+    id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT NOT NULL REFERENCES order_requests(id) ON DELETE CASCADE,
+    asset_name TEXT NOT NULL,
+    content_type TEXT,
+    asset_bytes BYTEA NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS admin_panel_sessions (

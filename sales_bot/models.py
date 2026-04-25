@@ -103,6 +103,7 @@ class CheckoutOrderRecord:
     id: int
     user_id: int
     payment_method: str
+    fulfillment_mode: str
     status: str
     paypal_status: str
     paypal_order_id: str | None
@@ -148,6 +149,30 @@ class DiscountCodeRecord:
     expires_at: str | None
     created_by: int | None
     created_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class RedeemCodeRecord:
+    id: int
+    code: str
+    system_id: int | None
+    issued_to_user_id: int | None
+    checkout_order_id: int | None
+    source: str
+    max_redemptions: int
+    is_active: bool
+    expires_at: str | None
+    created_by: int | None
+    created_at: str
+    redeemed_count: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class RedeemCodeRedemptionRecord:
+    id: int
+    redeem_code_id: int
+    user_id: int
+    redeemed_at: str
 
 
 @dataclass(slots=True, frozen=True)

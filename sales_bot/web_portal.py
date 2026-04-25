@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import mimetypes
 import logging
@@ -28,6 +29,7 @@ from sales_bot.models import (
     NotificationRecord,
     OrderRequestImageRecord,
     OrderRequestRecord,
+    RedeemCodeRecord,
     RobloxGamePassRecord,
     RobloxLinkRecord,
     SpecialOrderRequestRecord,
@@ -93,6 +95,7 @@ ADMIN_NAV_SECTIONS = (
         (
             {"label": "בלאקליסט", "href": "/admin/blacklist", "matches": ("/admin/blacklist",)},
             {"label": "קודי הנחה", "href": "/admin/discount-codes", "matches": ("/admin/discount-codes",)},
+            {"label": "קודי מימוש", "href": "/admin/redeem-codes", "matches": ("/admin/redeem-codes",)},
             {"label": "התראות", "href": "/admin/notifications", "matches": ("/admin/notifications",)},
         ),
     ),
@@ -501,6 +504,11 @@ PAYMENT_METHOD_LABELS = {
     "paypal": "PayPal",
 }
 
+CHECKOUT_FULFILLMENT_LABELS = {
+    "self": "עבורי",
+    "gift": "לקנות בשביל חבר",
+}
+
 WEBSITE_CARD_CHECKOUT_ENABLED = False
 
 PAYPAL_STATUS_LABELS = {
@@ -716,7 +724,7 @@ def _public_nav_html(current_path: str) -> str:
 
 
 def _public_account_shortcuts(current_path: str) -> str:
-    items = (("עגלה", "/cart"), ("התראות", "/inbox"))
+    items = (("עגלה", "/cart"), ("התראות", "/inbox"), ("מימוש קוד", "/redeem"))
     links: list[str] = []
     for label, href in items:
         is_active = current_path == href or current_path.startswith(f"{href}/")
@@ -799,6 +807,49 @@ def _money_label(amount: Decimal | str, currency: str) -> str:
 
 def _checkout_method_label(method: str) -> str:
     return PAYMENT_METHOD_LABELS.get(method.strip().lower(), method)
+
+
+def _checkout_fulfillment_label(mode: str) -> str:
+    return CHECKOUT_FULFILLMENT_LABELS.get(mode.strip().lower(), mode)
+
+
+def _checkout_fulfillment_options(selected_mode: str = "self") -> str:
+    normalized_mode = selected_mode.strip().lower() if selected_mode else "self"
+    return "".join(
+        f'<option value="{value}"{" selected" if value == normalized_mode else ""}>{_escape(label)}</option>'
+        for value, label in CHECKOUT_FULFILLMENT_LABELS.items()
+    )
+
+
+def _redeem_code_source_label(source: str) -> str:
+    normalized = source.strip().lower()
+    if normalized == "checkout-gift":
+        return "קניה בשביל חבר"
+    if normalized == "admin":
+        return "נוצר על ידי אדמין"
+    return source
+
+
+def _redeem_code_state_label(code: RedeemCodeRecord) -> str:
+    if not code.is_active:
+        return '<span class="catalog-badge warn">כבוי</span>'
+    if code.expires_at:
+        try:
+            expires_at = _parse_iso_datetime(code.expires_at)
+            if expires_at <= datetime.now(expires_at.tzinfo):
+                return '<span class="catalog-badge warn">פג תוקף</span>'
+        except ValueError:
+            pass
+    if code.redeemed_count >= code.max_redemptions:
+        return '<span class="catalog-badge warn">נוצל עד הסוף</span>'
+    return '<span class="catalog-badge">פעיל</span>'
+
+
+def _parse_iso_datetime(raw_value: str) -> datetime:
+    cleaned = str(raw_value or "").strip()
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1] + "+00:00"
+    return datetime.fromisoformat(cleaned)
 
 
 def _paypal_status_label(status: str) -> str:
@@ -1500,16 +1551,22 @@ async def website_paypal_return_page(request: web.Request) -> web.Response:
         order.id,
         paypal_order_id=paypal_order_token or None,
     )
+    delivery_message = (
+        "אם הכול עבר תקין, קודי המימוש כבר נוצרו עבורך ואפשר לראות אותם גם בעמוד המימושים."
+        if order.fulfillment_mode == "gift"
+        else "אם הכול עבר תקין, המערכות כבר נשלחו אוטומטית והעדכון נשמר גם במרכז ההתראות."
+    )
     content = f"""
     <div class="card stack">
         <h2>התשלום הושלם</h2>
-        <p>PayPal אישר את התשלום עבור הזמנה <strong>#{order.id}</strong>. אם הכול עבר תקין, המערכות כבר נשלחו אוטומטית והעדכון נשמר גם במרכז ההתראות.</p>
+        <p>PayPal אישר את התשלום עבור הזמנה <strong>#{order.id}</strong>. {delivery_message}</p>
         <div class="price-list">
             <div class="price-item"><strong>סטטוס הזמנה</strong><span>{_status_badge(order.status)}</span></div>
             <div class="price-item"><strong>סטטוס PayPal</strong><span>{_escape(_paypal_status_label(order.paypal_status))}</span></div>
+            <div class="price-item"><strong>מסלול מסירה</strong><span>{_escape(_checkout_fulfillment_label(order.fulfillment_mode))}</span></div>
             <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
         </div>
-        <div class="actions"><a class="link-button" href="/inbox">למרכז ההתראות</a><a class="link-button ghost-button" href="/systems">חזרה לחנות</a></div>
+        <div class="actions"><a class="link-button" href="{'/redeem' if order.fulfillment_mode == 'gift' else '/inbox'}">{'לעמוד המימושים' if order.fulfillment_mode == 'gift' else 'למרכז ההתראות'}</a><a class="link-button ghost-button" href="/systems">חזרה לחנות</a></div>
     </div>
     """
     body = _public_shell(
@@ -1675,6 +1732,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
     code_text = ""
     note = ""
     payment_method = "paypal"
+    fulfillment_mode = "self"
 
     try:
         bot, session = await _require_active_site_session(request)
@@ -1709,6 +1767,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
         if request.method == "POST":
             form = await request.post()
             payment_method = str(form.get("payment_method", "paypal")).strip().lower() or "paypal"
+            fulfillment_mode = str(form.get("fulfillment_mode", "self")).strip().lower() or "self"
             code_text = str(form.get("discount_code", "")).strip().upper()
             note = str(form.get("note", "")).strip()
             action = str(form.get("action", "preview")).strip().lower()
@@ -1745,6 +1804,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                 order = await bot.services.payments.create_checkout_order(
                     user_id=session.discord_user_id,
                     payment_method=payment_method,
+                    fulfillment_mode=fulfillment_mode,
                     items=effective_items,
                     subtotal_amount=format(subtotal, "f"),
                     discount_amount=format(code_discount_amount, "f"),
@@ -1759,6 +1819,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     f"משתמש: {_session_label(session)} ({session.discord_user_id})",
                     f"מזהה הזמנה: #{order.id}",
                     f"שיטת תשלום: {_checkout_method_label(order.payment_method)}",
+                    f"מסלול מסירה: {_checkout_fulfillment_label(order.fulfillment_mode)}",
                     f"סטטוס: {ORDER_STATUS_LABELS.get(order.status, order.status)}",
                     f"סכום ביניים: {_money_label(subtotal, currency)}",
                 ]
@@ -1806,6 +1867,10 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     f"הזמנה #{order.id} נפתחה ונשמרה במערכת. הסכום הכולל הוא {_money_label(order.total_amount, order.currency)} "
                     f"בשיטת {_checkout_method_label(order.payment_method)}."
                 )
+                if order.fulfillment_mode == "gift":
+                    summary_message += " אחרי אישור התשלום ייווצרו עבורך קודי מימוש שתוכל למסור לחבר דרך עמוד המימושים."
+                else:
+                    summary_message += " אחרי אישור התשלום המערכות יישלחו ישירות לחשבון שלך."
                 await bot.services.notifications.create_notification(
                     user_id=session.discord_user_id,
                     title=f"הזמנה חדשה #{order.id}",
@@ -1825,12 +1890,14 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                 <div class="card stack">
                     <h2>ההזמנה נפתחה</h2>
                     <p>הקופה נשמרה בהצלחה כמספר <strong>#{order.id}</strong>. כרגע האתר עובד עם אישור ידני לקופות מרובות פריטים, לכן הצוות יעבור על ההזמנה ויעדכן אותך דרך מרכז ההתראות.</p>
+                    <p>{'אחרי אישור התשלום יופקו עבורך קודי מימוש למסירה לחבר.' if order.fulfillment_mode == 'gift' else 'אחרי אישור התשלום המערכות יישלחו ישירות לחשבון שלך.'}</p>
                     <div class="price-list">
                         <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(_checkout_method_label(order.payment_method))}</span></div>
+                        <div class="price-item"><strong>מסלול מסירה</strong><span>{_escape(_checkout_fulfillment_label(order.fulfillment_mode))}</span></div>
                         <div class="price-item"><strong>סכום לתשלום</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
                         <div class="price-item"><strong>סטטוס</strong><span>{_status_badge(order.status)}</span></div>
                     </div>
-                    <div class="actions"><a class="link-button" href="/inbox">למרכז ההתראות</a><a class="link-button ghost-button" href="/systems">חזור לחנות</a></div>
+                    <div class="actions"><a class="link-button" href="/inbox">למרכז ההתראות</a><a class="link-button ghost-button" href="{'/redeem' if order.fulfillment_mode == 'gift' else '/systems'}">{'לעמוד המימושים' if order.fulfillment_mode == 'gift' else 'חזור לחנות'}</a></div>
                 </div>
                 '''
                 body = _public_shell(
@@ -1868,6 +1935,11 @@ async def website_checkout_page(request: web.Request) -> web.Response:
         else:
             code_notice = '<div class="meta-card"><strong>קוד הנחה:</strong> אפשר להזין קוד וללחוץ על בדיקה לפני שליחת הקופה.</div>'
 
+        if fulfillment_mode == "gift":
+            fulfillment_hint = "במסלול הזה, אחרי שהתשלום יאושר ייווצר קוד מימוש נפרד לכל מערכת שקנית. מי שמקבל את הקוד יוכל לממש אותו פעם אחת, ורק אם הוא עדיין לא מחזיק במערכת."
+        else:
+            fulfillment_hint = "במסלול הרגיל, אחרי אישור התשלום המערכות יישלחו ישירות לחשבון שמבצע את הקנייה."
+
         payment_options_html = '<option value="card" disabled>כרטיס אשראי (לא זמין כרגע)</option>'
         submit_disabled_attr = ''
         preview_disabled_attr = ''
@@ -1886,12 +1958,14 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                 <h2>פרטי הקופה</h2>
                 <form method="post" class="stack">
                     <label class="field"><span>שיטת תשלום</span><select name="payment_method">{payment_options_html}</select></label>
+                    <label class="field"><span>מסלול מסירה</span><select name="fulfillment_mode">{_checkout_fulfillment_options(fulfillment_mode)}</select></label>
                     <label class="field"><span>קוד הנחה</span><input type="text" name="discount_code" maxlength="32" value="{_escape(code_text)}" placeholder="SUMMER10"></label>
                     <label class="field field-wide"><span>הערה לצוות</span><textarea name="note" placeholder="למשל: עדיף לפנות אליי קודם בדיסקורד">{_escape(note)}</textarea></label>
                     <div class="actions"><button type="submit" name="action" value="preview" class="ghost-button"{preview_disabled_attr}>בדוק קוד וחשב מחדש</button><button type="submit" name="action" value="submit"{submit_disabled_attr}>שלח קופה</button></div>
                 </form>
                 {code_notice}
                 <p class="muted">{_escape(payment_hint)}</p>
+                <p class="muted">{_escape(fulfillment_hint)}</p>
             </div>
             <div class="card stack">
                 <h2>סיכום חיוב</h2>
@@ -1900,6 +1974,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     <div class="price-item"><strong>סכום ביניים</strong><span>{_escape(_money_label(subtotal, currency))}</span></div>
                     <div class="price-item"><strong>הנחת קוד</strong><span>{_escape(_money_label(code_discount_amount, currency))}</span></div>
                     <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(total_amount, currency))}</span></div>
+                    <div class="price-item"><strong>מסלול מסירה</strong><span>{_escape(_checkout_fulfillment_label(fulfillment_mode))}</span></div>
                 </div>
             </div>
         </div>
@@ -1978,6 +2053,7 @@ async def website_inbox_page(request: web.Request) -> web.Response:
             <div class="price-list">
                 <div class="price-item"><strong>הזמנה #{order.id}</strong><span>{_status_badge(order.status)}</span></div>
                 <div class="price-item"><strong>אמצעי תשלום</strong><span>{_escape(_checkout_method_label(order.payment_method))}</span></div>
+                <div class="price-item"><strong>מסלול מסירה</strong><span>{_escape(_checkout_fulfillment_label(order.fulfillment_mode))}</span></div>
                 <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
                 <div class="price-item"><strong>נפתחה ב</strong><span>{_escape(order.created_at)}</span></div>
                 {f'<div class="price-item"><strong>סיבת ביטול</strong><span>{_escape(order.cancel_reason or "-")}</span></div>' if order.status == 'cancelled' else ''}
@@ -2015,6 +2091,84 @@ async def website_inbox_page(request: web.Request) -> web.Response:
         content=content,
     )
     return _page_response("מרכז ההתראות", body)
+
+
+async def website_redeem_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    code_text = ""
+    bot, session = await _require_active_site_session(request)
+
+    if request.method == "POST":
+        form = await request.post()
+        code_text = str(form.get("code", "")).strip()
+        action = str(form.get("action", "redeem")).strip().lower()
+        try:
+            if action == "redeem":
+                updated_code, system = await bot.services.redeem_codes.redeem_code(
+                    bot,
+                    user_id=session.discord_user_id,
+                    code_text=code_text,
+                )
+                notice = f"הקוד {updated_code.code} מומש בהצלחה עבור {system.name}."
+                code_text = ""
+        except SalesBotError as exc:
+            notice = str(exc)
+            success = False
+
+    systems = await bot.services.systems.list_systems()
+    system_names = {system.id: system.name for system in systems}
+    codes = await bot.services.redeem_codes.list_codes_for_user(session.discord_user_id, limit=120)
+    code_cards = ''.join(
+        f'''
+        <div class="card stack">
+            <div class="price-list">
+                <div class="price-item"><strong>{_escape(code.code)}</strong><span>{_redeem_code_state_label(code)}</span></div>
+                <div class="price-item"><strong>מערכת</strong><span>{_escape(system_names.get(code.system_id or -1, 'לא מחובר למערכת'))}</span></div>
+                <div class="price-item"><strong>מקור</strong><span>{_escape(_redeem_code_source_label(code.source))}</span></div>
+                <div class="price-item"><strong>שימושים</strong><span>{code.redeemed_count}/{code.max_redemptions}</span></div>
+                <div class="price-item"><strong>תפוגה</strong><span>{_escape(code.expires_at or 'ללא')}</span></div>
+                {f'<div class="price-item"><strong>הזמנת מקור</strong><span>#{code.checkout_order_id}</span></div>' if code.checkout_order_id is not None else ''}
+            </div>
+            <p class="muted">אפשר למסור את הקוד הזה לחבר. אם הוא כבר מחזיק במערכת או מימש את הקוד, המימוש ייחסם.</p>
+        </div>
+        '''
+        for code in codes
+    ) or '<div class="empty-card"><p>עדיין אין קודי מימוש בחשבון שלך.</p></div>'
+
+    content = f'''
+    {_notice_html(notice, success=success)}
+    <div class="split-grid">
+        <div class="card stack">
+            <h2>מימוש קוד</h2>
+            <form method="post" class="stack">
+                <input type="hidden" name="action" value="redeem">
+                <label class="field"><span>קוד מימוש</span><input type="text" name="code" maxlength="64" value="{_escape(code_text)}" placeholder="S12XABCDEFGH" required></label>
+                <div class="actions"><button type="submit">ממש קוד</button></div>
+            </form>
+        </div>
+        <div class="card stack">
+            <h2>איך זה עובד</h2>
+            <p>אם קיבלת קוד ממישהו שקנה בשבילך, מזינים אותו כאן. המערכת תבדוק שהקוד עדיין פעיל, לא פג תוקף, ויש בו מימוש פנוי.</p>
+            <p>אי אפשר לממש קוד למערכת שכבר בבעלותך, ואחרי מימוש מוצלח המערכת תישלח אליך ב-DM ותופיע גם בעמוד הפרופיל.</p>
+        </div>
+    </div>
+    <div class="card stack">
+        <h2>הקודים שלי</h2>
+        <p class="muted">כאן מופיעים כל קודי המתנה שנוצרו עבורך בקופות מסוג "לקנות בשביל חבר".</p>
+        <div class="stack">{code_cards}</div>
+    </div>
+    '''
+    body = _public_shell(
+        session,
+        current_path="/redeem",
+        title="מימוש קודים",
+        intro="כאן אפשר לממש קוד שקיבלת וגם לראות את כל קודי המתנה שיצאו מהקניות שלך.",
+        login_path=request.path,
+        section_label="מימוש קודים",
+        content=content,
+    )
+    return _page_response("מימוש קודים", body)
 
 
 async def website_profile_page(request: web.Request) -> web.Response:
@@ -2976,6 +3130,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
             <div class="card"><h3>מערכות מיוחדות</h3><p>פרסום מערכת מיוחדת עם כפתור קניה, תמונות, מחירים ושיטות תשלום.</p><div class="actions"><a class="link-button" href="/admin/special-systems">פתח</a></div></div>
             <div class="card"><h3>בקשות מיוחדות</h3><p>רשימת כל הבקשות, צפייה בפרטים, אישור או דחייה עם הודעה חזרה.</p><div class="actions"><a class="link-button" href="/admin/special-orders">פתח</a></div></div>
             <div class="card"><h3>קודי הנחה</h3><p>יצירת קודים כלליים או קודים למערכת מסוימת, עם מגבלות שימוש ותוקף.</p><div class="actions"><a class="link-button" href="/admin/discount-codes">פתח</a></div></div>
+            <div class="card"><h3>קודי מימוש</h3><p>יצירה, כיבוי ומחיקה של קודי מתנה, כולל קודים לקניה בשביל חבר והגרלות.</p><div class="actions"><a class="link-button" href="/admin/redeem-codes">פתח</a></div></div>
             <div class="card"><h3>התראות ללקוחות</h3><p>שליחת התראה ישירות לפי מזהה משתמש בדיסקורד, כולל שמירה במרכז ההתראות באתר.</p><div class="actions"><a class="link-button" href="/admin/notifications">פתח</a></div></div>
             <div class="card"><h3>כלי תוכן קיימים</h3><p>הפאנלים הקיימים של סקרים, הגרלות ואירועים נשארו זמינים גם דרך האתר.</p><div class="actions"><a class="link-button" href="/admin/polls/new">סקרים</a><a class="link-button ghost-button" href="/admin/giveaways/new">הגרלות</a><a class="link-button ghost-button" href="/admin/events/new">אירועים</a></div></div>
             <div class="card"><h3>הגדרות אישיות</h3><p>פרטי החשבון המחובר, הדרגה שלך והעדפת ערכת הנושא של האתר.</p><div class="actions"><a class="link-button" href="/admin/settings">פתח</a></div></div>
@@ -3069,22 +3224,7 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
                 if existing_order.payment_method == "paypal":
                     raise PermissionDeniedError("הזמנות PayPal מושלמות אוטומטית אחרי אישור התשלום מפייפאל, ולא דרך הכפתור הידני הזה.")
                 order = await bot.services.payments.complete_checkout_order(bot, order_id, session.discord_user_id)
-                message = f"הזמנה #{order.id} הושלמה והמערכות נשלחו ב-DM."
-                await bot.services.notifications.create_notification(
-                    user_id=order.user_id,
-                    title=f"הזמנה #{order.id} הושלמה",
-                    body=message,
-                    link_path="/inbox",
-                    kind="checkout",
-                    created_by=session.discord_user_id,
-                )
-                dm_sent = await _send_optional_user_dm(
-                    bot,
-                    user_id=order.user_id,
-                    title=f"הזמנה #{order.id} הושלמה",
-                    body=message,
-                    link_path="/inbox",
-                )
+                message, dm_sent = await bot.services.payments.send_completed_checkout_notifications(bot, order)
                 notice = message + (" נשלחה גם הודעת DM ללקוח." if dm_sent else " נשמרה התראה באתר, אבל DM לא נשלח.")
             elif action == "cancel":
                 cancel_reason = str(form.get("cancel_reason", "")).strip() or "ההזמנה בוטלה על ידי צוות האתר."
@@ -3116,6 +3256,7 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
                     <div class="price-item"><strong>הזמנה #{order.id}</strong><span>{_status_badge(order.status)}</span></div>
                     <div class="price-item"><strong>לקוח</strong><span>{_escape(label)}<br><span class="mono">{order.user_id}</span></span></div>
                     <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(_checkout_method_label(order.payment_method))}</span></div>
+                    <div class="price-item"><strong>מסלול מסירה</strong><span>{_escape(_checkout_fulfillment_label(order.fulfillment_mode))}</span></div>
                     {f'<div class="price-item"><strong>סטטוס PayPal</strong><span>{_escape(_paypal_status_label(order.paypal_status))}</span></div>' if order.payment_method == 'paypal' else ''}
                     {f'<div class="price-item"><strong>PayPal Order ID</strong><span class="mono">{_escape(order.paypal_order_id or "-")}</span></div>' if order.payment_method == 'paypal' else ''}
                     {f'<div class="price-item"><strong>PayPal Capture ID</strong><span class="mono">{_escape(order.paypal_capture_id or "-")}</span></div>' if order.payment_method == 'paypal' else ''}
@@ -3131,7 +3272,7 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
                     <h3>מערכות בהזמנה</h3>
                     <div class="price-list">{_checkout_items_html(item_lists_by_order.get(order.id, []), order.currency)}</div>
                 </div>
-                {'' if order.status != 'pending' else (f'<div class="meta-card"><strong>PayPal:</strong> ההזמנה הזאת תושלם אוטומטית אחרי אישור וחזרה מ-PayPal או דרך הוובהוק.</div><div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>' if order.payment_method == 'paypal' else f'<div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="complete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit">סמן כהושלמה ושלח</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>')}
+                {'' if order.status != 'pending' else (f'<div class="meta-card"><strong>PayPal:</strong> ההזמנה הזאת תושלם אוטומטית אחרי אישור וחזרה מ-PayPal או דרך הוובהוק, ואז תתבצע המסירה או יצירת קודי המימוש לפי המסלול שנבחר.</div><div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>' if order.payment_method == 'paypal' else f'<div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="complete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit">סמן כהושלמה</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>')}
             </div>
             '''
             for order, label in zip(orders, labels, strict=False)
@@ -3141,7 +3282,7 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
         {_notice_html(notice, success=success)}
         <div class="card stack">
             <h2>סקירת קופות אתר</h2>
-            <p>העמוד הזה מרכז את כל הזמנות הסל שנפתחו דרך האתר. קופות כרטיס עדיין מטופלות ידנית, וקופות PayPal מוצגות כאן עם סטטוס ההזמנה האמיתי מפייפאל עד למסירה האוטומטית.</p>
+            <p>העמוד הזה מרכז את כל הזמנות הסל שנפתחו דרך האתר. קופות כרטיס עדיין מטופלות ידנית, קופות PayPal מוצגות כאן עם סטטוס ההזמנה האמיתי מפייפאל, ומסלול המסירה מבהיר אם מדובר במסירה ישירה או ביצירת קודי מימוש.</p>
         </div>
         <div class="stack">{cards}</div>
         '''
@@ -3248,6 +3389,106 @@ async def admin_discount_codes_page(request: web.Request) -> web.Response:
         raise
     except SalesBotError as exc:
         return _error_response("קודי הנחה", str(exc), status=400)
+
+
+async def admin_redeem_codes_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    bot, session = await _require_admin_session(request)
+    systems = await bot.services.systems.list_systems()
+
+    if request.method == "POST":
+        form = await request.post()
+        action = str(form.get("action", "")).strip().lower()
+        try:
+            if action == "create":
+                system_id = _parse_positive_int(form.get("system_id"), "מזהה מערכת", allow_blank=True)
+                max_redemptions = _parse_positive_int(form.get("max_redemptions"), "מספר מימושים", allow_blank=True) or 1
+                code = await bot.services.redeem_codes.create_code(
+                    code=str(form.get("code", "")).strip() or None,
+                    system_id=system_id,
+                    max_redemptions=max_redemptions,
+                    expires_at=str(form.get("expires_at", "")).strip() or None,
+                    created_by=session.discord_user_id,
+                    issued_to_user_id=None,
+                    checkout_order_id=None,
+                    source=bot.services.redeem_codes.ADMIN_SOURCE,
+                )
+                notice = f"קוד המימוש {code.code} נוצר בהצלחה."
+            elif action == "toggle":
+                code_id = _parse_positive_int(form.get("code_id"), "מזהה קוד")
+                assert code_id is not None
+                next_state = str(form.get("next_state", "")).strip().lower() == "true"
+                updated = await bot.services.redeem_codes.set_active(code_id, next_state)
+                notice = f"קוד המימוש {updated.code} {'הופעל' if updated.is_active else 'הושבת'}."
+            elif action == "delete":
+                code_id = _parse_positive_int(form.get("code_id"), "מזהה קוד")
+                assert code_id is not None
+                code = await bot.services.redeem_codes.get_code(code_id)
+                await bot.services.redeem_codes.delete_code(code_id)
+                notice = f"קוד המימוש {code.code} נמחק."
+        except SalesBotError as exc:
+            notice = str(exc)
+            success = False
+
+    codes = await bot.services.redeem_codes.list_codes(limit=200)
+    system_names = {system.id: system.name for system in systems}
+    issued_user_ids = sorted({code.issued_to_user_id for code in codes if code.issued_to_user_id is not None})
+    issued_user_labels = {}
+    if issued_user_ids:
+        labels = await asyncio.gather(*(_discord_user_label(bot, user_id) for user_id in issued_user_ids))
+        issued_user_labels = dict(zip(issued_user_ids, labels, strict=False))
+
+    code_cards = ''.join(
+        f'''
+        <div class="card stack">
+            <div class="price-list">
+                <div class="price-item"><strong>{_escape(code.code)}</strong><span>{_redeem_code_state_label(code)}</span></div>
+                <div class="price-item"><strong>מערכת</strong><span>{_escape(system_names.get(code.system_id or -1, 'לא מחובר למערכת'))}</span></div>
+                <div class="price-item"><strong>מקור</strong><span>{_escape(_redeem_code_source_label(code.source))}</span></div>
+                <div class="price-item"><strong>שויך ללקוח</strong><span>{_escape(issued_user_labels.get(code.issued_to_user_id or 0, 'ללא שיוך'))}</span></div>
+                <div class="price-item"><strong>שימושים</strong><span>{code.redeemed_count}/{code.max_redemptions}</span></div>
+                <div class="price-item"><strong>תפוגה</strong><span>{_escape(code.expires_at or 'ללא')}</span></div>
+                {f'<div class="price-item"><strong>הזמנת מקור</strong><span>#{code.checkout_order_id}</span></div>' if code.checkout_order_id is not None else ''}
+            </div>
+            <div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="toggle"><input type="hidden" name="code_id" value="{code.id}"><input type="hidden" name="next_state" value="{'false' if code.is_active else 'true'}"><button type="submit" class="ghost-button">{'השבת' if code.is_active else 'הפעל'}</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="code_id" value="{code.id}"><button type="submit" class="ghost-button danger">מחק</button></form></div>
+        </div>
+        '''
+        for code in codes
+    ) or '<div class="empty-card"><p>עדיין לא נוצרו קודי מימוש.</p></div>'
+
+    content = f'''
+    {_notice_html(notice, success=success)}
+    <div class="split-grid">
+        <div class="card stack">
+            <h2>יצירת קוד חדש</h2>
+            <form method="post">
+                <input type="hidden" name="action" value="create">
+                <div class="grid">
+                    <label class="field"><span>קוד</span><input type="text" name="code" maxlength="64" placeholder="השאר ריק ליצירה אוטומטית"></label>
+                    <label class="field"><span>מערכת ספציפית</span><select name="system_id">{_system_options(systems, None)}</select></label>
+                    <label class="field"><span>מקסימום מימושים</span><input type="number" min="1" name="max_redemptions" value="1"></label>
+                    <label class="field"><span>תפוגה</span><input type="datetime-local" name="expires_at"></label>
+                </div>
+                <div class="actions"><button type="submit">צור קוד</button></div>
+            </form>
+        </div>
+        <div class="card stack">
+            <h2>מה אפשר לעשות כאן</h2>
+            <p>קוד שמחובר למערכת אחת מתאים למתנות, פיצויים או הגרלות. אם משאירים את שדה הקוד ריק, המערכת תייצר קוד אוטומטי בסגנון המתאים.</p>
+            <p>אפשר גם ליצור קוד עם כמה מימושים, לקבוע תפוגה, או להשבית קוד קיים בלי למחוק אותו. קודים שנוצרים אוטומטית מקופות "לקנות בשביל חבר" יופיעו כאן גם כן.</p>
+        </div>
+    </div>
+    <div class="stack">{code_cards}</div>
+    '''
+    body = _admin_shell(
+        session,
+        current_path=request.path,
+        title="קודי מימוש",
+        intro="יצירה וניהול של קודי מתנה, קודי giveaway וקודי רכישה בשביל חבר.",
+        content=content,
+    )
+    return _page_response("קודי מימוש", body)
 
 
 async def admin_notifications_page(request: web.Request) -> web.Response:

@@ -258,6 +258,7 @@ CREATE TABLE IF NOT EXISTS website_checkout_orders (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
     payment_method TEXT NOT NULL,
+    fulfillment_mode TEXT NOT NULL DEFAULT 'self',
     status TEXT NOT NULL DEFAULT 'pending',
     paypal_status TEXT NOT NULL DEFAULT 'not-started',
     paypal_order_id TEXT,
@@ -286,6 +287,28 @@ CREATE TABLE IF NOT EXISTS website_checkout_order_items (
     unit_price NUMERIC(12, 2) NOT NULL,
     line_total NUMERIC(12, 2) NOT NULL,
     PRIMARY KEY (order_id, system_id)
+);
+
+CREATE TABLE IF NOT EXISTS redeem_codes (
+    id BIGSERIAL PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    system_id BIGINT REFERENCES systems(id) ON DELETE SET NULL,
+    issued_to_user_id BIGINT,
+    checkout_order_id BIGINT REFERENCES website_checkout_orders(id) ON DELETE SET NULL,
+    source TEXT NOT NULL DEFAULT 'admin',
+    max_redemptions INTEGER NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    expires_at TIMESTAMPTZ,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS redeem_code_redemptions (
+    id BIGSERIAL PRIMARY KEY,
+    redeem_code_id BIGINT NOT NULL REFERENCES redeem_codes(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    redeemed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (redeem_code_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS discount_code_redemptions (

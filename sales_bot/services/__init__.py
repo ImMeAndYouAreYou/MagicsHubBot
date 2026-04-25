@@ -16,6 +16,7 @@ from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.panels import AdminPanelService
 from sales_bot.services.payments import PaymentService
+from sales_bot.services.redeem_codes import RedeemCodeService
 from sales_bot.services.roblox_creator import RobloxCreatorService
 from sales_bot.services.special_systems import SpecialSystemService
 from sales_bot.services.systems import SystemService
@@ -36,6 +37,7 @@ class ServiceContainer:
     delivery: DeliveryService
     notifications: NotificationService
     payments: PaymentService
+    redeem_codes: RedeemCodeService
     vouches: VouchService
     oauth: RobloxOAuthService
     roblox_creator: RobloxCreatorService

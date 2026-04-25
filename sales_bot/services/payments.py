@@ -71,6 +71,7 @@ class PaymentService:
         *,
         user_id: int,
         payment_method: str,
+        fulfillment_mode: str = "self",
         items: Iterable[tuple[SystemRecord, str]],
         subtotal_amount: str,
         discount_amount: str,
@@ -83,6 +84,7 @@ class PaymentService:
         normalized_method = payment_method.strip().lower()
         if normalized_method not in {"card", "paypal"}:
             raise PermissionDeniedError("שיטת התשלום שנבחרה לא נתמכת בקופה.")
+        normalized_fulfillment_mode = self._normalize_fulfillment_mode(fulfillment_mode)
 
         item_list = list(items)
         if not item_list:
@@ -93,6 +95,7 @@ class PaymentService:
             INSERT INTO website_checkout_orders (
                 user_id,
                 payment_method,
+                fulfillment_mode,
                 discount_code_id,
                 discount_code_text,
                 subtotal_amount,
@@ -101,11 +104,12 @@ class PaymentService:
                 currency,
                 note
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
                 normalized_method,
+                normalized_fulfillment_mode,
                 discount_code_id,
                 discount_code_text.strip().upper() if discount_code_text else None,
                 subtotal_amount,
@@ -276,7 +280,7 @@ class PaymentService:
 
         if not was_completed:
             order = await self.complete_checkout_order(bot, order.id, reviewer_id=None)
-            await self._notify_checkout_paid(bot, order)
+            await self.send_completed_checkout_notifications(bot, order)
         return await self.get_checkout_order(order.id)
 
     async def process_paypal_webhook(
@@ -321,7 +325,7 @@ class PaymentService:
             )
             if not was_completed:
                 order = await self.complete_checkout_order(bot, order.id, reviewer_id=None)
-                await self._notify_checkout_paid(bot, order)
+                await self.send_completed_checkout_notifications(bot, order)
             return {"handled": True, "event_type": event_type, "order_id": order.id}
 
         if event_type in {"PAYMENT.CAPTURE.DENIED", "PAYMENT.CAPTURE.DECLINED", "PAYMENT.CAPTURE.REFUNDED", "CHECKOUT.ORDER.VOIDED"}:
@@ -364,19 +368,28 @@ class PaymentService:
         if order.status != "pending":
             raise PermissionDeniedError("אפשר להשלים רק הזמנות שעדיין ממתינות לאישור.")
 
-        user = bot.get_user(order.user_id) or await bot.fetch_user(order.user_id)
         items = await self.list_checkout_order_items(order.id)
-        for item in items:
-            if await bot.services.ownership.user_owns_system(order.user_id, item.system_id):
-                continue
-            system = await bot.services.systems.get_system(item.system_id)
-            await bot.services.delivery.deliver_system(
-                bot,
-                user,
-                system,
-                source=f"checkout:{order.id}",
-                granted_by=reviewer_id,
+        if order.fulfillment_mode == "gift":
+            systems = [await bot.services.systems.get_system(item.system_id) for item in items]
+            await bot.services.redeem_codes.issue_checkout_gift_codes(
+                order_id=order.id,
+                issued_to_user_id=order.user_id,
+                systems=systems,
+                created_by=reviewer_id if reviewer_id is not None else order.user_id,
             )
+        else:
+            user = bot.get_user(order.user_id) or await bot.fetch_user(order.user_id)
+            for item in items:
+                if await bot.services.ownership.user_owns_system(order.user_id, item.system_id):
+                    continue
+                system = await bot.services.systems.get_system(item.system_id)
+                await bot.services.delivery.deliver_system(
+                    bot,
+                    user,
+                    system,
+                    source=f"checkout:{order.id}",
+                    granted_by=reviewer_id,
+                )
 
         await self.database.execute(
             """
@@ -434,6 +447,99 @@ class PaymentService:
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning("Failed to deliver checkout order message to owner fallback DM", exc_info=True)
             return False
+
+    async def send_completed_checkout_notifications(
+        self,
+        bot: "SalesBot",
+        order: CheckoutOrderRecord,
+    ) -> tuple[str, bool]:
+        payment_method_label = self._payment_method_label(order.payment_method)
+        fulfillment_label = self._fulfillment_mode_label(order.fulfillment_mode)
+        total_label = f"{order.total_amount} {order.currency.upper()}"
+        items = await self.list_checkout_order_items(order.id)
+        item_names_by_id = {item.system_id: item.system_name for item in items}
+
+        link_path = "/inbox"
+        message = (
+            f"הזמנה #{order.id} הושלמה. "
+            f"שיטת התשלום: {payment_method_label}. "
+            f"הסכום שחויב: {total_label}. "
+            f"המערכות נמסרו, והסטטוס נשמר במרכז ההתראות שלך."
+        )
+        dm_message = (
+            f"**הזמנה #{order.id} הושלמה**\n{message}\n"
+            f"{bot.settings.public_base_url}{link_path}"
+        )
+        admin_body = (
+            f"לקוח: {order.user_id}\n"
+            f"שיטת תשלום: {payment_method_label}\n"
+            f"מסלול מסירה: {fulfillment_label}\n"
+            f"סכום: {total_label}\n"
+            f"PayPal Order ID: {order.paypal_order_id or '-'}\n"
+            f"PayPal Capture ID: {order.paypal_capture_id or '-'}\n"
+            f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts"
+        )
+
+        if order.fulfillment_mode == "gift":
+            gift_codes = await bot.services.redeem_codes.list_codes_for_order(order.id)
+            link_path = "/redeem"
+            message = (
+                f"הזמנה #{order.id} הושלמה. "
+                f"שיטת התשלום: {payment_method_label}. "
+                f"הסכום שחויב: {total_label}. "
+                f"נוצרו עבורך {len(gift_codes)} קודי מימוש למסירה לחבר, ואפשר לראות אותם בעמוד מימוש הקודים."
+            )
+            code_lines = "\n".join(
+                f"- {item_names_by_id.get(code.system_id or 0, f'מערכת #{code.system_id}')}: {code.code}"
+                for code in gift_codes
+            ) or "- לא נוצרו קודים זמינים"
+            dm_message = (
+                f"**הזמנה #{order.id} הושלמה**\n{message}\n"
+                f"קודי המימוש שלך:\n{code_lines}\n"
+                f"{bot.settings.public_base_url}{link_path}"
+            )
+            admin_body = (
+                f"לקוח: {order.user_id}\n"
+                f"שיטת תשלום: {payment_method_label}\n"
+                f"מסלול מסירה: {fulfillment_label}\n"
+                f"סכום: {total_label}\n"
+                f"PayPal Order ID: {order.paypal_order_id or '-'}\n"
+                f"PayPal Capture ID: {order.paypal_capture_id or '-'}\n"
+                f"קודי מימוש:\n{code_lines}\n"
+                f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts"
+            )
+        elif order.paypal_order_id or order.paypal_capture_id:
+            dm_message = (
+                f"**הזמנה #{order.id} הושלמה**\n{message}\n"
+                f"PayPal Order ID: {order.paypal_order_id or '-'}\n"
+                f"PayPal Capture ID: {order.paypal_capture_id or '-'}\n"
+                f"{bot.settings.public_base_url}{link_path}"
+            )
+
+        await bot.services.notifications.create_notification(
+            user_id=order.user_id,
+            title=f"הזמנה #{order.id} הושלמה",
+            body=message,
+            link_path=link_path,
+            kind="checkout",
+            created_by=order.reviewed_by,
+        )
+
+        dm_sent = False
+        try:
+            user = bot.get_user(order.user_id) or await bot.fetch_user(order.user_id)
+            dm_channel = user.dm_channel or await user.create_dm()
+            await dm_channel.send(dm_message)
+            dm_sent = True
+        except (discord.Forbidden, discord.HTTPException):
+            LOGGER.warning("Failed to DM user about completed checkout order %s", order.id, exc_info=True)
+
+        await self.send_checkout_admin_notification(
+            bot,
+            title=f"הזמנה #{order.id} הושלמה",
+            body=admin_body,
+        )
+        return message, dm_sent
 
     async def _paypal_access_token(self, bot: "SalesBot") -> str:
         if not bot.settings.paypal_checkout_enabled:
@@ -666,45 +772,7 @@ class PaymentService:
         return None
 
     async def _notify_checkout_paid(self, bot: "SalesBot", order: CheckoutOrderRecord) -> None:
-        payment_method_label = self._payment_method_label(order.payment_method)
-        total_label = f"{order.total_amount} {order.currency.upper()}"
-        message = (
-            f"הזמנה #{order.id} הושלמה אוטומטית. "
-            f"שיטת התשלום: {payment_method_label}. "
-            f"הסכום שחויב: {total_label}. "
-            f"המערכות נמסרו, והסטטוס נשמר במרכז ההתראות שלך."
-        )
-        await bot.services.notifications.create_notification(
-            user_id=order.user_id,
-            title=f"הזמנה #{order.id} הושלמה",
-            body=message,
-            link_path="/inbox",
-            kind="checkout",
-        )
-        try:
-            user = bot.get_user(order.user_id) or await bot.fetch_user(order.user_id)
-            dm_channel = user.dm_channel or await user.create_dm()
-            await dm_channel.send(
-                f"**הזמנה #{order.id} הושלמה**\n{message}\n"
-                f"PayPal Order ID: {order.paypal_order_id or '-'}\n"
-                f"PayPal Capture ID: {order.paypal_capture_id or '-'}\n"
-                f"{bot.settings.public_base_url}/inbox"
-            )
-        except (discord.Forbidden, discord.HTTPException):
-            LOGGER.warning("Failed to DM user about completed checkout order %s", order.id, exc_info=True)
-
-        await self.send_checkout_admin_notification(
-            bot,
-            title=f"הזמנה #{order.id} הושלמה אוטומטית",
-            body=(
-                f"לקוח: {order.user_id}\n"
-                f"שיטת תשלום: {payment_method_label}\n"
-                f"סכום: {total_label}\n"
-                f"PayPal Order ID: {order.paypal_order_id or '-'}\n"
-                f"PayPal Capture ID: {order.paypal_capture_id or '-'}\n"
-                f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts"
-            ),
-        )
+        await self.send_completed_checkout_notifications(bot, order)
 
     @staticmethod
     def _payment_method_label(method: str) -> str:
@@ -714,6 +782,20 @@ class PaymentService:
         if normalized == "card":
             return "כרטיס אשראי"
         return method
+
+    @staticmethod
+    def _fulfillment_mode_label(mode: str) -> str:
+        normalized = mode.strip().lower()
+        if normalized == "gift":
+            return "לקנות בשביל חבר"
+        return "עבורי"
+
+    @staticmethod
+    def _normalize_fulfillment_mode(mode: str | None) -> str:
+        normalized = str(mode or "self").strip().lower()
+        if normalized not in {"self", "gift"}:
+            raise PermissionDeniedError("מסלול המסירה שנבחר לקופה לא נתמך.")
+        return normalized
 
     @staticmethod
     def _map_purchase(row: aiosqlite.Row) -> PurchaseRecord:
@@ -733,6 +815,7 @@ class PaymentService:
             id=int(row["id"]),
             user_id=int(row["user_id"]),
             payment_method=str(row["payment_method"]),
+            fulfillment_mode=str(row["fulfillment_mode"] or "self"),
             status=str(row["status"]),
             paypal_status=str(row["paypal_status"] or "not-started"),
             paypal_order_id=str(row["paypal_order_id"]) if row["paypal_order_id"] else None,

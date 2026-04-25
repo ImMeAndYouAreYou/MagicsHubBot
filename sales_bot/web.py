@@ -25,6 +25,7 @@ from sales_bot.web_portal import (
     admin_checkout_orders_page,
     admin_dashboard_page,
     admin_discount_codes_page,
+    admin_redeem_codes_page,
     admin_gamepasses_page,
     admin_notifications_page,
     admin_settings_page,
@@ -51,6 +52,7 @@ from sales_bot.web_portal import (
     website_home_page,
     website_info_page,
     website_inbox_page,
+    website_redeem_page,
     website_callback,
     website_login,
     website_logout,
@@ -84,6 +86,7 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/checkout/paypal/return", website_paypal_return_page)
     app.router.add_get("/checkout/paypal/cancel", website_paypal_cancel_page)
     app.router.add_route("*", "/inbox", website_inbox_page)
+    app.router.add_route("*", "/redeem", website_redeem_page)
     app.router.add_route("*", "/profile", website_profile_page)
     app.router.add_route("*", "/vouches", website_vouches_page)
     app.router.add_get("/systems", public_systems_page)
@@ -108,6 +111,7 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_route("*", "/admin/custom-orders/{order_id:\\d+}", custom_order_detail_page)
     app.router.add_get("/admin/custom-order-images/{image_id:\\d+}", custom_order_image_page)
     app.router.add_route("*", "/admin/discount-codes", admin_discount_codes_page)
+    app.router.add_route("*", "/admin/redeem-codes", admin_redeem_codes_page)
     app.router.add_route("*", "/admin/systems", admin_systems_page)
     app.router.add_route("*", "/admin/gamepasses", admin_gamepasses_page)
     app.router.add_route("*", "/admin/notifications", admin_notifications_page)

@@ -28,6 +28,7 @@ from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.panels import AdminPanelService
 from sales_bot.services.payments import PaymentService
+from sales_bot.services.redeem_codes import RedeemCodeService
 from sales_bot.services.roblox_creator import RobloxCreatorService
 from sales_bot.services.special_systems import SpecialSystemService
 from sales_bot.services.systems import SystemService
@@ -90,6 +91,7 @@ class SalesBot(commands.Bot):
             delivery=DeliveryService(),
             notifications=NotificationService(self.database),
             payments=PaymentService(self.database),
+            redeem_codes=RedeemCodeService(self.database),
             vouches=VouchService(self.database),
             oauth=RobloxOAuthService(self.database, self.settings),
             roblox_creator=RobloxCreatorService(self.database, self.settings),

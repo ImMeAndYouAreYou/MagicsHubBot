@@ -271,6 +271,7 @@ CREATE TABLE IF NOT EXISTS website_checkout_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     payment_method TEXT NOT NULL,
+    fulfillment_mode TEXT NOT NULL DEFAULT 'self',
     status TEXT NOT NULL DEFAULT 'pending',
     paypal_status TEXT NOT NULL DEFAULT 'not-started',
     paypal_order_id TEXT,
@@ -302,6 +303,31 @@ CREATE TABLE IF NOT EXISTS website_checkout_order_items (
     PRIMARY KEY (order_id, system_id),
     FOREIGN KEY (order_id) REFERENCES website_checkout_orders(id) ON DELETE CASCADE,
     FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS redeem_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    system_id INTEGER,
+    issued_to_user_id INTEGER,
+    checkout_order_id INTEGER,
+    source TEXT NOT NULL DEFAULT 'admin',
+    max_redemptions INTEGER NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT 1,
+    expires_at TEXT,
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE SET NULL,
+    FOREIGN KEY (checkout_order_id) REFERENCES website_checkout_orders(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS redeem_code_redemptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    redeem_code_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    redeemed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (redeem_code_id, user_id),
+    FOREIGN KEY (redeem_code_id) REFERENCES redeem_codes(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS discount_code_redemptions (

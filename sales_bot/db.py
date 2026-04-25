@@ -68,6 +68,7 @@ class Database:
         await self._ensure_column("website_checkout_orders", "paypal_capture_id", "TEXT")
         await self._ensure_column("website_checkout_orders", "paypal_approval_url", "TEXT")
         await self._ensure_column("website_checkout_orders", "paypal_payload_json", "TEXT")
+        await self._ensure_column("website_checkout_orders", "fulfillment_mode", "TEXT NOT NULL DEFAULT 'self'")
         await self.execute(
             "CREATE INDEX IF NOT EXISTS idx_website_checkout_orders_paypal_order_id ON website_checkout_orders(paypal_order_id)"
         )

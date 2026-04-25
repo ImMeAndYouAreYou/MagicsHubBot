@@ -152,6 +152,24 @@ class PaymentService:
         )
         return [self._map_checkout_item(row) for row in rows]
 
+    async def list_checkout_order_items_for_orders(
+        self,
+        order_ids: list[int],
+    ) -> dict[int, list[CheckoutOrderItemRecord]]:
+        if not order_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in order_ids)
+        rows = await self.database.fetchall(
+            f"SELECT * FROM website_checkout_order_items WHERE order_id IN ({placeholders}) ORDER BY order_id ASC, system_name ASC",
+            tuple(order_ids),
+        )
+        grouped_items: dict[int, list[CheckoutOrderItemRecord]] = {order_id: [] for order_id in order_ids}
+        for row in rows:
+            item = self._map_checkout_item(row)
+            grouped_items[item.order_id].append(item)
+        return grouped_items
+
     async def list_user_checkout_orders(self, user_id: int) -> list[CheckoutOrderRecord]:
         rows = await self.database.fetchall(
             "SELECT * FROM website_checkout_orders WHERE user_id = ? ORDER BY created_at DESC",

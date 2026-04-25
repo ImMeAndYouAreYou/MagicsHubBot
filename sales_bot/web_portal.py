@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import mimetypes
 import logging
 from io import BytesIO
+import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -50,6 +51,10 @@ if TYPE_CHECKING:
 
 
 LOGGER = logging.getLogger(__name__)
+
+DISCORD_USER_LABEL_CACHE_TTL_SECONDS = 15 * 60
+DISCORD_USER_LABEL_CACHE_MAX_ENTRIES = 4096
+_DISCORD_USER_LABEL_CACHE: dict[int, tuple[float, str]] = {}
 
 THEME_COOKIE_NAME = "magic_admin_theme"
 THEME_LABELS = {
@@ -763,17 +768,50 @@ def _extract_file_upload(field: Any, *, image_only: bool = False) -> tuple[str, 
 
 
 async def _discord_user_label(bot: "SalesBot", user_id: int) -> str:
+    now = time.monotonic()
+    cached = _DISCORD_USER_LABEL_CACHE.get(user_id)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
     user = bot.get_user(user_id)
     if user is None:
         try:
             user = await bot.fetch_user(user_id)
         except discord.HTTPException:
-            return str(user_id)
+            label = str(user_id)
+            _remember_discord_user_label(user_id, label, now=now)
+            return label
     username = str(getattr(user, "name", "") or "").strip()
     global_name = str(getattr(user, "global_name", "") or "").strip()
     if global_name and username and global_name.casefold() != username.casefold():
-        return f"{global_name} (@{username})"
-    return global_name or (f"@{username}" if username else str(user_id))
+        label = f"{global_name} (@{username})"
+        _remember_discord_user_label(user_id, label, now=now)
+        return label
+
+    label = global_name or (f"@{username}" if username else str(user_id))
+    _remember_discord_user_label(user_id, label, now=now)
+    return label
+
+
+def _remember_discord_user_label(user_id: int, label: str, *, now: float | None = None) -> None:
+    current_time = now if now is not None else time.monotonic()
+    _DISCORD_USER_LABEL_CACHE[user_id] = (current_time + DISCORD_USER_LABEL_CACHE_TTL_SECONDS, label)
+    if len(_DISCORD_USER_LABEL_CACHE) <= DISCORD_USER_LABEL_CACHE_MAX_ENTRIES:
+        return
+
+    expired_user_ids = [cached_user_id for cached_user_id, (expires_at, _label) in _DISCORD_USER_LABEL_CACHE.items() if expires_at <= current_time]
+    for cached_user_id in expired_user_ids:
+        _DISCORD_USER_LABEL_CACHE.pop(cached_user_id, None)
+
+    if len(_DISCORD_USER_LABEL_CACHE) <= DISCORD_USER_LABEL_CACHE_MAX_ENTRIES:
+        return
+
+    oldest_user_ids = sorted(
+        _DISCORD_USER_LABEL_CACHE,
+        key=lambda cached_user_id: _DISCORD_USER_LABEL_CACHE[cached_user_id][0],
+    )[: len(_DISCORD_USER_LABEL_CACHE) - DISCORD_USER_LABEL_CACHE_MAX_ENTRIES]
+    for cached_user_id in oldest_user_ids:
+        _DISCORD_USER_LABEL_CACHE.pop(cached_user_id, None)
 
 
 def _system_options(systems: list[SystemRecord], selected_system_id: int | None = None) -> str:
@@ -1088,7 +1126,7 @@ async def website_info_page(request: web.Request) -> web.Response:
 async def public_systems_page(request: web.Request) -> web.Response:
     bot, session = await _require_active_site_session(request)
     systems = await bot.services.systems.list_public_systems()
-    system_images = await asyncio.gather(*(bot.services.systems.list_system_images(system.id) for system in systems)) if systems else []
+    system_images_by_id = await bot.services.systems.list_system_images_for_systems(systems) if systems else {}
     owned_ids = {system.id for system in await bot.services.ownership.list_user_systems(session.discord_user_id)}
     discounts = {
         discount.system.id: discount.discount_percent
@@ -1098,11 +1136,11 @@ async def public_systems_page(request: web.Request) -> web.Response:
         '<div class="catalog-grid">' + ''.join(
             _render_system_card(
                 system,
-                image_urls=_system_gallery_urls(system, images),
+                image_urls=_system_gallery_urls(system, system_images_by_id.get(system.id, [])),
                 owned=system.id in owned_ids,
                 discount_percent=discounts.get(system.id),
             )
-            for system, images in zip(systems, system_images, strict=False)
+            for system in systems
         ) + '</div>'
         if systems
         else '<div class="empty-card"><h2>אין מערכות זמינות כרגע</h2><p>נסו שוב מאוחר יותר.</p></div>'
@@ -1906,12 +1944,13 @@ async def website_vouches_page(request: web.Request) -> web.Response:
     admin_ids = await bot.services.admins.list_admin_ids()
     vouch_lists = await asyncio.gather(*(bot.services.vouches.list_vouches(admin_user_id) for admin_user_id in admin_ids))
     vouches = sorted((vouch for records in vouch_lists for vouch in records), key=lambda record: (record.created_at, record.id), reverse=True)
+    label_user_ids = list({vouch.admin_user_id for vouch in vouches} | {vouch.author_user_id for vouch in vouches})
+    label_values = await asyncio.gather(*(_discord_user_label(bot, user_id) for user_id in label_user_ids)) if label_user_ids else []
+    labels_by_user_id = dict(zip(label_user_ids, label_values, strict=False))
     cards: list[str] = []
     for vouch in vouches:
-        admin_label, author_label = await asyncio.gather(
-            _discord_user_label(bot, vouch.admin_user_id),
-            _discord_user_label(bot, vouch.author_user_id),
-        )
+        admin_label = labels_by_user_id.get(vouch.admin_user_id, str(vouch.admin_user_id))
+        author_label = labels_by_user_id.get(vouch.author_user_id, str(vouch.author_user_id))
         delete_form = ""
         if is_admin:
             delete_form = f'<form method="post" class="inline-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="vouch_id" value="{vouch.id}"><button type="submit" class="ghost-button danger">מחיקה</button></form>'
@@ -2844,7 +2883,7 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
 
         orders = await bot.services.payments.list_checkout_orders(limit=120)
         labels = await asyncio.gather(*(_discord_user_label(bot, order.user_id) for order in orders)) if orders else []
-        item_lists = await asyncio.gather(*(bot.services.payments.list_checkout_order_items(order.id) for order in orders)) if orders else []
+        item_lists_by_order = await bot.services.payments.list_checkout_order_items_for_orders([order.id for order in orders]) if orders else {}
         cards = "".join(
             f'''
             <div class="card stack">
@@ -2865,12 +2904,12 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
                 </div>
                 <div>
                     <h3>מערכות בהזמנה</h3>
-                    <div class="price-list">{_checkout_items_html(items, order.currency)}</div>
+                    <div class="price-list">{_checkout_items_html(item_lists_by_order.get(order.id, []), order.currency)}</div>
                 </div>
                 {'' if order.status != 'pending' else (f'<div class="meta-card"><strong>PayPal:</strong> ההזמנה הזאת תושלם אוטומטית אחרי אישור וחזרה מ-PayPal או דרך הוובהוק.</div><div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>' if order.payment_method == 'paypal' else f'<div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="complete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit">סמן כהושלמה ושלח</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>')}
             </div>
             '''
-            for order, label, items in zip(orders, labels, item_lists, strict=False)
+            for order, label in zip(orders, labels, strict=False)
         ) or '<div class="empty-card"><p>עדיין אין הזמנות קופה שמורות במערכת.</p></div>'
 
         content = f'''

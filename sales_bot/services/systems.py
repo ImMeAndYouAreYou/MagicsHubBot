@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
@@ -377,6 +378,39 @@ class SystemService:
             (system_id,),
         )
         return [self._map_gallery_image(row) for row in rows]
+
+    async def list_system_images_for_systems(
+        self,
+        systems: list[SystemRecord],
+    ) -> dict[int, list[SystemGalleryImageRecord]]:
+        if not systems:
+            return {}
+
+        grouped_images: dict[int, list[SystemGalleryImageRecord]] = {system.id: [] for system in systems}
+        system_ids = [system.id for system in systems]
+        placeholders = ", ".join("?" for _ in system_ids)
+        existing_rows = await self.database.fetchall(
+            f"SELECT DISTINCT system_id FROM system_gallery_images WHERE system_id IN ({placeholders})",
+            tuple(system_ids),
+        )
+        existing_system_ids = {int(row["system_id"]) for row in existing_rows}
+
+        missing_gallery_systems = [
+            system
+            for system in systems
+            if system.id not in existing_system_ids and system.image_path
+        ]
+        if missing_gallery_systems:
+            await asyncio.gather(*(self._ensure_system_gallery_backfilled(system) for system in missing_gallery_systems))
+
+        rows = await self.database.fetchall(
+            f"SELECT * FROM system_gallery_images WHERE system_id IN ({placeholders}) ORDER BY system_id ASC, sort_order ASC, id ASC",
+            tuple(system_ids),
+        )
+        for row in rows:
+            image = self._map_gallery_image(row)
+            grouped_images[image.system_id].append(image)
+        return grouped_images
 
     async def get_system_gallery_image(self, image_id: int) -> SystemGalleryImageRecord:
         row = await self.database.fetchone("SELECT * FROM system_gallery_images WHERE id = ?", (image_id,))

@@ -104,6 +104,11 @@ class CheckoutOrderRecord:
     user_id: int
     payment_method: str
     status: str
+    paypal_status: str
+    paypal_order_id: str | None
+    paypal_capture_id: str | None
+    paypal_approval_url: str | None
+    paypal_payload_json: str | None
     discount_code_id: int | None
     discount_code_text: str | None
     subtotal_amount: str

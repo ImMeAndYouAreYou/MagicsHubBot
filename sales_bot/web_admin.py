@@ -1005,7 +1005,7 @@ def _render_system_form(
                 <textarea name="description" required>{_escape(values['description'])}</textarea>
             </label>
             <label class="field">
-                <span>קישור פייפאל</span>
+                <span>קישור פייפאל ישיר (ישן, אופציונלי)</span>
                 <input type="url" name="paypal_link" value="{_escape(values['paypal_link'])}">
             </label>
             <label class="field">
@@ -1013,7 +1013,7 @@ def _render_system_form(
                 <input type="text" name="roblox_gamepass" value="{_escape(values['roblox_gamepass'])}">
             </label>
             <label class="field">
-                <span>מחיר באתר</span>
+                <span>מחיר באתר / לקופת PayPal</span>
                 <input type="text" name="website_price" inputmode="decimal" placeholder="19.99" value="{_escape(values['website_price'])}">
             </label>
             <label class="field">

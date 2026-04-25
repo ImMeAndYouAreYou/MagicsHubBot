@@ -63,6 +63,11 @@ class Database:
         await self._ensure_column("blacklist_entries", "reason", "TEXT NOT NULL DEFAULT ''")
         await self._ensure_column("order_requests", "roblox_username", "TEXT")
         await self._ensure_column("order_requests", "admin_reply", "TEXT")
+        await self._ensure_column("website_checkout_orders", "paypal_status", "TEXT NOT NULL DEFAULT 'not-started'")
+        await self._ensure_column("website_checkout_orders", "paypal_order_id", "TEXT")
+        await self._ensure_column("website_checkout_orders", "paypal_capture_id", "TEXT")
+        await self._ensure_column("website_checkout_orders", "paypal_approval_url", "TEXT")
+        await self._ensure_column("website_checkout_orders", "paypal_payload_json", "TEXT")
 
     async def _ensure_column(self, table_name: str, column_name: str, column_sql: str) -> None:
         if self.database_url:

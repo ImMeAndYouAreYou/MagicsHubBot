@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
-from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
+from sales_bot.exceptions import ConfigurationError, ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.web_admin import (
     admin_html_response,
     event_create_page,
@@ -54,7 +54,9 @@ from sales_bot.web_portal import (
     website_callback,
     website_login,
     website_logout,
+    website_paypal_cancel_page,
     website_paypal_purchase_page,
+    website_paypal_return_page,
     website_profile_page,
     website_vouches_page,
 )
@@ -79,6 +81,8 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/auth/logout", website_logout)
     app.router.add_route("*", "/cart", website_cart_page)
     app.router.add_route("*", "/checkout", website_checkout_page)
+    app.router.add_get("/checkout/paypal/return", website_paypal_return_page)
+    app.router.add_get("/checkout/paypal/cancel", website_paypal_cancel_page)
     app.router.add_route("*", "/inbox", website_inbox_page)
     app.router.add_route("*", "/profile", website_profile_page)
     app.router.add_route("*", "/vouches", website_vouches_page)
@@ -94,6 +98,7 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/oauth/roblox/callback", roblox_callback)
     app.router.add_get("/oauth/roblox/owner/callback", roblox_owner_callback)
     app.router.add_post("/webhooks/paypal/simulate", paypal_webhook)
+    app.router.add_post("/webhooks/paypal", paypal_webhook)
     app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
     app.router.add_get("/admin", admin_dashboard_page)
     app.router.add_route("*", "/admin/admins", admin_admins_page)
@@ -461,26 +466,44 @@ async def roblox_owner_callback(request: web.Request) -> web.Response:
 
 async def paypal_webhook(request: web.Request) -> web.Response:
     bot: SalesBot = request.app["bot"]
-    provided_token = request.headers.get("X-Webhook-Token", "")
-    if provided_token != bot.settings.paypal_webhook_token:
-        return web.json_response({"error": "unauthorized"}, status=401)
-
     payload: dict[str, Any] = await request.json()
-    purchase_id = int(payload.get("purchase_id", 0))
-    status = str(payload.get("status", "")).upper()
+    if request.path.endswith("/simulate"):
+        provided_token = request.headers.get("X-Webhook-Token", "")
+        if not bot.settings.paypal_webhook_token:
+            return web.json_response({"error": "simulation token not configured"}, status=503)
+        if provided_token != bot.settings.paypal_webhook_token:
+            return web.json_response({"error": "unauthorized"}, status=401)
 
-    if purchase_id <= 0 or status != "COMPLETED":
-        return web.json_response({"error": "invalid payload"}, status=400)
+        purchase_id = int(payload.get("purchase_id", 0))
+        status = str(payload.get("status", "")).upper()
+
+        if purchase_id <= 0 or status != "COMPLETED":
+            return web.json_response({"error": "invalid payload"}, status=400)
+
+        try:
+            await bot.services.payments.complete_purchase(bot, purchase_id, payload)
+        except NotFoundError as exc:
+            return web.json_response({"error": str(exc)}, status=404)
+        except Exception:
+            LOGGER.exception("PayPal simulation webhook failed")
+            return web.json_response({"error": "internal error"}, status=500)
+
+        return web.json_response({"status": "completed", "purchase_id": purchase_id})
 
     try:
-        await bot.services.payments.complete_purchase(bot, purchase_id, payload)
+        result = await bot.services.payments.process_paypal_webhook(bot, request.headers, payload)
+        return web.json_response(result, status=200 if result.get("handled") else 202)
+    except ConfigurationError as exc:
+        return web.json_response({"error": str(exc)}, status=503)
+    except PermissionDeniedError as exc:
+        return web.json_response({"error": str(exc)}, status=401)
     except NotFoundError as exc:
         return web.json_response({"error": str(exc)}, status=404)
+    except ExternalServiceError as exc:
+        return web.json_response({"error": str(exc)}, status=502)
     except Exception:
-        LOGGER.exception("PayPal simulation webhook failed")
+        LOGGER.exception("PayPal webhook processing failed")
         return web.json_response({"error": "internal error"}, status=500)
-
-    return web.json_response({"status": "completed", "purchase_id": purchase_id})
 
 
 async def roblox_gamepass_webhook(request: web.Request) -> web.Response:

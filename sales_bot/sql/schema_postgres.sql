@@ -259,6 +259,11 @@ CREATE TABLE IF NOT EXISTS website_checkout_orders (
     user_id BIGINT NOT NULL,
     payment_method TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
+    paypal_status TEXT NOT NULL DEFAULT 'not-started',
+    paypal_order_id TEXT,
+    paypal_capture_id TEXT,
+    paypal_approval_url TEXT,
+    paypal_payload_json TEXT,
     discount_code_id BIGINT REFERENCES discount_codes(id) ON DELETE SET NULL,
     discount_code_text TEXT,
     subtotal_amount NUMERIC(12, 2) NOT NULL,
@@ -291,6 +296,8 @@ CREATE TABLE IF NOT EXISTS discount_code_redemptions (
     discount_amount NUMERIC(12, 2) NOT NULL,
     redeemed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_website_checkout_orders_paypal_order_id ON website_checkout_orders(paypal_order_id);
 
 CREATE TABLE IF NOT EXISTS website_notifications (
     id BIGSERIAL PRIMARY KEY,

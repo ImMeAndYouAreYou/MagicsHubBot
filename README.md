@@ -117,8 +117,8 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Systems can optionally store a Roblox gamepass ID or full link for Robux purchases.
 - System deliveries go through DMs, send embeds plus attached files, and are logged so blacklist and revoke actions can delete prior bot-sent system messages.
 - Blacklist appeals use a modal and a persistent owner-DM button view that survives bot restarts.
-- PayPal purchases create a pending purchase record and are completed by a webhook simulation endpoint that triggers automatic delivery.
-- The website now includes a multi-system cart, manual card/PayPal checkout queue, redeemable discount codes, and a user inbox for site notifications and order updates.
+- Legacy direct PayPal purchases still exist for per-system links, and the website checkout can now create real PayPal orders, capture them on return, verify webhooks, and deliver systems automatically when PayPal is configured.
+- The website now includes a multi-system cart, manual card checkout, real PayPal cart checkout, redeemable discount codes, and a user inbox for site notifications and order updates.
 - Ownership is tracked in `user_systems` and can be granted, checked, or revoked.
 - Admins can save transferable ownership snapshots, transfer supported systems between Discord users without duplication, and permanently block old Roblox reclaims after transfer.
 - Vouches use a preview flow with edit support and publish to the configured vouch channel.
@@ -144,6 +144,8 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Admin-only web panels can create and edit events with reward text, star-reaction entry, stored IDs, and manual `/rollrandomuser` or `/rerolluser` winner control.
 - Systems can be edited through an admin dropdown plus web editor, including metadata, file replacement, image replacement, PayPal link, and Roblox gamepass updates.
 - The AI assistant answers in the configured support channel, can use a separate configured training channel for `/trainbot`, prioritizes admin-trained local knowledge entries over built-in docs, reads slash-command definitions plus workflow knowledge derived from the bot code and services, can read screenshots, public links, and text files, can silently learn useful support-channel context outside `/trainbot`, and if no training channel is configured it falls back to the support channel.
+
+For PayPal environment setup and webhook instructions, see `docs/paypal-setup.md`.
 
 ## Database Schema
 
@@ -193,7 +195,6 @@ Required values:
 - `DISCORD_CLIENT_SECRET`
 - `OWNER_USER_ID`
 - `VOUCH_CHANNEL_ID`
-- `PAYPAL_WEBHOOK_TOKEN`
 
 Optional values:
 
@@ -215,6 +216,11 @@ Optional values:
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
 - `PUBLIC_BASE_URL`
+- `PAYPAL_CLIENT_ID`
+- `PAYPAL_CLIENT_SECRET`
+- `PAYPAL_ENV`
+- `PAYPAL_WEBHOOK_ID`
+- `PAYPAL_WEBHOOK_TOKEN`
 - `WEB_HOST`
 - `WEB_PORT`
 - `PORT`
@@ -231,6 +237,10 @@ If the Roblox OAuth variables are omitted, the bot still starts normally and the
 If the Roblox owner OAuth variables are omitted, the bot still starts normally and the owner-only game pass commands stay unavailable until those values are configured.
 
 If `AI_TRAINING_CHANNEL_ID` is omitted, `/trainbot` keeps using `AI_SUPPORT_CHANNEL_ID` as the training location.
+
+If `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are omitted, the website PayPal checkout stays disabled and the cart falls back to manual handling.
+
+If you enable the real website PayPal checkout, also set `PAYPAL_WEBHOOK_ID` and make sure the PayPal webhook points to `/webhooks/paypal` on your public domain.
 
 ## Render
 
@@ -251,6 +261,16 @@ If you want the server owner to manage Roblox game passes from Discord on Render
 - `ROBLOX_OWNER_REDIRECT_URI=https://<your-render-domain>/oauth/roblox/owner/callback`
 - `ROBLOX_OWNER_UNIVERSE_ID=<your Roblox universe id>`
 - `ROBLOX_GAMEPASS_WEBHOOK_TOKEN=<a long random secret used by your Roblox game webhook>`
+
+If you want the real website PayPal checkout on Render, also set:
+
+- `PUBLIC_BASE_URL=https://<your-render-domain>`
+- `PAYPAL_CLIENT_ID=<your PayPal app client id>`
+- `PAYPAL_CLIENT_SECRET=<your PayPal app secret>`
+- `PAYPAL_ENV=sandbox` or `PAYPAL_ENV=live`
+- `PAYPAL_WEBHOOK_ID=<your PayPal webhook id>`
+
+The full setup walkthrough is in `docs/paypal-setup.md`.
 
 The bot also supports a background self-ping loop using `PUBLIC_BASE_URL`. By default it pings `/health` every 180 seconds. You can control that with:
 

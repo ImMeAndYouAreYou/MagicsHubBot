@@ -64,6 +64,13 @@ def _normalized_gemini_model(raw: str | None) -> str:
     return value
 
 
+def _normalized_paypal_environment(raw: str | None) -> str:
+    value = (raw or "").strip().lower()
+    if value not in {"sandbox", "live"}:
+        return "sandbox"
+    return value
+
+
 def _resolve_runtime_data_dir(base_dir: Path) -> Path:
     candidates = (
         base_dir / "data",
@@ -107,7 +114,11 @@ class Settings:
     gemini_api_key: str | None
     gemini_model: str
     public_base_url: str
-    paypal_webhook_token: str
+    paypal_client_id: str | None
+    paypal_client_secret: str | None
+    paypal_environment: str
+    paypal_webhook_id: str | None
+    paypal_webhook_token: str | None
     web_host: str
     web_port: int
     sqlite_path: Path
@@ -146,6 +157,14 @@ class Settings:
     @property
     def roblox_owner_gamepass_management_enabled(self) -> bool:
         return self.roblox_owner_oauth_enabled and self.roblox_owner_universe_id is not None
+
+    @property
+    def paypal_checkout_enabled(self) -> bool:
+        return bool(self.paypal_client_id and self.paypal_client_secret)
+
+    @property
+    def paypal_api_base_url(self) -> str:
+        return "https://api-m.paypal.com" if self.paypal_environment == "live" else "https://api-m.sandbox.paypal.com"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -192,7 +211,11 @@ class Settings:
             gemini_api_key=_optional_env("GEMINI_API_KEY"),
             gemini_model=_normalized_gemini_model(os.getenv("GEMINI_MODEL")),
             public_base_url=public_base_url,
-            paypal_webhook_token=_require_env("PAYPAL_WEBHOOK_TOKEN"),
+            paypal_client_id=_optional_env("PAYPAL_CLIENT_ID"),
+            paypal_client_secret=_optional_env("PAYPAL_CLIENT_SECRET"),
+            paypal_environment=_normalized_paypal_environment(os.getenv("PAYPAL_ENV")),
+            paypal_webhook_id=_optional_env("PAYPAL_WEBHOOK_ID"),
+            paypal_webhook_token=_optional_env("PAYPAL_WEBHOOK_TOKEN"),
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
             web_port=_int_with_default("WEB_PORT", _int_with_default("PORT", 8080)),
             sqlite_path=sqlite_path,

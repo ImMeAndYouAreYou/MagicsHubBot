@@ -272,6 +272,11 @@ CREATE TABLE IF NOT EXISTS website_checkout_orders (
     user_id INTEGER NOT NULL,
     payment_method TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
+    paypal_status TEXT NOT NULL DEFAULT 'not-started',
+    paypal_order_id TEXT,
+    paypal_capture_id TEXT,
+    paypal_approval_url TEXT,
+    paypal_payload_json TEXT,
     discount_code_id INTEGER,
     discount_code_text TEXT,
     subtotal_amount TEXT NOT NULL,
@@ -309,6 +314,8 @@ CREATE TABLE IF NOT EXISTS discount_code_redemptions (
     FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id) ON DELETE CASCADE,
     FOREIGN KEY (order_id) REFERENCES website_checkout_orders(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_website_checkout_orders_paypal_order_id ON website_checkout_orders(paypal_order_id);
 
 CREATE TABLE IF NOT EXISTS website_notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

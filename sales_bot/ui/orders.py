@@ -150,7 +150,7 @@ class OrderPanelView(discord.ui.View):
         button: discord.ui.Button[Any],
     ) -> None:
         await interaction.response.send_message(
-            "טופס ההזמנה האישית עבר לאתר. פתח את הדף, התחבר עם Discord אם צריך, ושלח שם את ההזמנה.",
+            "טופס ההזמנה האישית עבר לאתר. פתח את הדף, התחבר עם דיסקורד אם צריך, ושלח שם את ההזמנה.",
             view=OrderPanelWebsiteView(self.bot),
             ephemeral=True,
         )

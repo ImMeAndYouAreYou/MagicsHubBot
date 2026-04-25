@@ -346,6 +346,18 @@ PAYMENT_METHOD_LABELS = {
     "paypal": "PayPal",
 }
 
+PAYPAL_STATUS_LABELS = {
+    "NOT-STARTED": "לא התחיל",
+    "CREATED": "הזמנת PayPal נוצרה",
+    "APPROVED": "אושר ב-PayPal",
+    "COMPLETED": "הושלם",
+    "CANCELLED": "בוטל",
+    "VOIDED": "בוטל ב-PayPal",
+    "DENIED": "נדחה",
+    "DECLINED": "נדחה",
+    "REFUNDED": "הוחזר",
+}
+
 CUSTOM_ORDER_MAX_IMAGES = 5
 CUSTOM_ORDER_FORM_MAX_MB = 25
 CUSTOM_ORDER_FORM_MAX_BYTES = CUSTOM_ORDER_FORM_MAX_MB * 1024 * 1024
@@ -571,6 +583,11 @@ def _money_label(amount: Decimal | str, currency: str) -> str:
 
 def _checkout_method_label(method: str) -> str:
     return PAYMENT_METHOD_LABELS.get(method.strip().lower(), method)
+
+
+def _paypal_status_label(status: str) -> str:
+    normalized = status.strip().upper()
+    return PAYPAL_STATUS_LABELS.get(normalized, normalized or "לא התחיל")
 
 
 def _cart_currency(items: list[CartItemRecord]) -> str:
@@ -1214,6 +1231,97 @@ async def website_paypal_purchase_page(request: web.Request) -> web.Response:
     return _page_response("פייפאל", body)
 
 
+async def website_paypal_return_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    paypal_order_token = str(request.query.get("token", "")).strip()
+    order_id = _parse_positive_int(request.query.get("order_id"), "מזהה הזמנה", allow_blank=True)
+    if order_id is None and not paypal_order_token:
+        raise PermissionDeniedError("חסרים פרטים לחזרה מ-PayPal.")
+
+    order = (
+        await bot.services.payments.get_checkout_order(order_id)
+        if order_id is not None
+        else await bot.services.payments.get_checkout_order_by_paypal_order_id(paypal_order_token)
+    )
+    if order.user_id != session.discord_user_id:
+        raise PermissionDeniedError("אי אפשר לצפות בהזמנה שלא שייכת לחשבון המחובר.")
+
+    order = await bot.services.payments.capture_paypal_checkout(
+        bot,
+        order.id,
+        paypal_order_id=paypal_order_token or None,
+    )
+    content = f"""
+    <div class="card stack">
+        <h2>התשלום הושלם</h2>
+        <p>PayPal אישר את התשלום עבור הזמנה <strong>#{order.id}</strong>. אם הכול עבר תקין, המערכות כבר נשלחו אוטומטית והעדכון נשמר גם במרכז ההתראות.</p>
+        <div class="price-list">
+            <div class="price-item"><strong>סטטוס הזמנה</strong><span>{_status_badge(order.status)}</span></div>
+            <div class="price-item"><strong>סטטוס PayPal</strong><span>{_escape(_paypal_status_label(order.paypal_status))}</span></div>
+            <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
+        </div>
+        <div class="actions"><a class="link-button" href="/inbox">למרכז ההתראות</a><a class="link-button ghost-button" href="/systems">חזרה לחנות</a></div>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path="/checkout",
+        title="תשלום PayPal הושלם",
+        intro="התשלום חזר מהשער המאובטח של PayPal ונבדק מול ההזמנה שלך.",
+        login_path=request.path_qs or request.path,
+        section_label="PayPal",
+        content=content,
+    )
+    return _page_response("תשלום PayPal הושלם", body)
+
+
+async def website_paypal_cancel_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    order_id = _parse_positive_int(request.query.get("order_id"), "מזהה הזמנה", allow_blank=True)
+    paypal_order_token = str(request.query.get("token", "")).strip()
+    if order_id is None and not paypal_order_token:
+        raise PermissionDeniedError("חסרים פרטים לביטול תשלום PayPal.")
+
+    order = (
+        await bot.services.payments.get_checkout_order(order_id)
+        if order_id is not None
+        else await bot.services.payments.get_checkout_order_by_paypal_order_id(paypal_order_token)
+    )
+    if order.user_id != session.discord_user_id:
+        raise PermissionDeniedError("אי אפשר לנהל הזמנה שלא שייכת לחשבון המחובר.")
+
+    cancel_reason = "הלקוח ביטל את תהליך התשלום ב-PayPal לפני אישור סופי."
+    order = await bot.services.payments.mark_paypal_checkout_cancelled(order.id, cancel_reason)
+    await bot.services.notifications.create_notification(
+        user_id=order.user_id,
+        title=f"הזמנה #{order.id} בוטלה",
+        body=cancel_reason,
+        link_path="/inbox",
+        kind="checkout",
+    )
+    content = f"""
+    <div class="card stack">
+        <h2>התשלום בוטל</h2>
+        <p>PayPal החזיר את ההזמנה <strong>#{order.id}</strong> כפעולה שבוטלה. לא נגבה ממך תשלום, והקופה המקומית סומנה כמבוטלת.</p>
+        <div class="price-list">
+            <div class="price-item"><strong>סטטוס הזמנה</strong><span>{_status_badge(order.status)}</span></div>
+            <div class="price-item"><strong>סטטוס PayPal</strong><span>{_escape(_paypal_status_label(order.paypal_status))}</span></div>
+        </div>
+        <div class="actions"><a class="link-button" href="/systems">חזרה לחנות</a><a class="link-button ghost-button" href="/cart">לעגלה</a></div>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path="/checkout",
+        title="תשלום PayPal בוטל",
+        intro="התשלום בוטל לפני אישור סופי, ולכן לא בוצעה מסירה של מערכות.",
+        login_path=request.path_qs or request.path,
+        section_label="PayPal",
+        content=content,
+    )
+    return _page_response("תשלום PayPal בוטל", body)
+
+
 async def website_cart_page(request: web.Request) -> web.Response:
     bot, session = await _require_active_site_session(request)
     if request.method == "POST":
@@ -1356,6 +1464,9 @@ async def website_checkout_page(request: web.Request) -> web.Response:
             note = str(form.get("note", "")).strip()
             action = str(form.get("action", "preview")).strip().lower()
 
+            if payment_method == "paypal" and not bot.settings.paypal_checkout_enabled:
+                raise ConfigurationError("PayPal עדיין לא מוגדר בשרת. עדכן PAYPAL_CLIENT_ID ו-PAYPAL_CLIENT_SECRET כדי להפעיל אותו.")
+
             if code_text:
                 try:
                     code_record, discount_amount_text = await bot.services.discount_codes.preview_discount(
@@ -1388,6 +1499,19 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     discount_code_id=code_record.id if code_record is not None else None,
                     discount_code_text=code_record.code if code_record is not None else None,
                 )
+
+                if payment_method == "paypal":
+                    order = await bot.services.payments.start_paypal_checkout(bot, order.id)
+                    if code_record is not None:
+                        await bot.services.discount_codes.record_redemption(
+                            code_record.id,
+                            session.discord_user_id,
+                            order.id,
+                            format(code_discount_amount, "f"),
+                        )
+                    await bot.services.cart.clear_cart(session.discord_user_id)
+                    raise web.HTTPFound(order.paypal_approval_url or f"/checkout/paypal/return?order_id={order.id}")
+
                 if code_record is not None:
                     await bot.services.discount_codes.record_redemption(
                         code_record.id,
@@ -1395,6 +1519,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                         order.id,
                         format(code_discount_amount, "f"),
                     )
+
                 await bot.services.cart.clear_cart(session.discord_user_id)
 
                 summary_message = (
@@ -1484,19 +1609,26 @@ async def website_checkout_page(request: web.Request) -> web.Response:
         else:
             code_notice = '<div class="meta-card"><strong>קוד הנחה:</strong> אפשר להזין קוד וללחוץ על בדיקה לפני שליחת הקופה.</div>'
 
+        payment_options_html = '<option value="card"' + (' selected' if payment_method == 'card' else '') + '>כרטיס אשראי</option>'
+        if bot.settings.paypal_checkout_enabled:
+            payment_options_html += '<option value="paypal"' + (' selected' if payment_method == 'paypal' else '') + '>PayPal</option>'
+            payment_hint = 'אם תבחר PayPal, האתר ייצור הזמנה מאובטחת, יעביר אותך לאישור התשלום, ואחרי החזרה המערכות יימסרו אוטומטית.'
+        else:
+            payment_hint = 'כרגע PayPal עדיין לא מוגדר בשרת הזה. אפשר לשלוח קופה ידנית בכרטיס אשראי עד שתחבר את פרטי PayPal לשרת.'
+
         content = f'''
         {_notice_html(notice, success=success)}
         <div class="split-grid">
             <div class="card stack">
                 <h2>פרטי הקופה</h2>
                 <form method="post" class="stack">
-                    <label class="field"><span>שיטת תשלום</span><select name="payment_method"><option value="card"{' selected' if payment_method == 'card' else ''}>כרטיס אשראי</option><option value="paypal"{' selected' if payment_method == 'paypal' else ''}>PayPal</option></select></label>
+                    <label class="field"><span>שיטת תשלום</span><select name="payment_method">{payment_options_html}</select></label>
                     <label class="field"><span>קוד הנחה</span><input type="text" name="discount_code" maxlength="32" value="{_escape(code_text)}" placeholder="SUMMER10"></label>
                     <label class="field field-wide"><span>הערה לצוות</span><textarea name="note" placeholder="למשל: עדיף לפנות אליי קודם בדיסקורד">{_escape(note)}</textarea></label>
                     <div class="actions"><button type="submit" name="action" value="preview" class="ghost-button">בדוק קוד וחשב מחדש</button><button type="submit" name="action" value="submit">שלח קופה</button></div>
                 </form>
                 {code_notice}
-                <p class="muted">הקופה שומרת הזמנה מרוכזת בכרטיס או PayPal. אישור התשלום עצמו מטופל כרגע ידנית על ידי צוות האתר.</p>
+                <p class="muted">{_escape(payment_hint)}</p>
             </div>
             <div class="card stack">
                 <h2>סיכום חיוב</h2>
@@ -1941,7 +2073,7 @@ async def admin_blacklist_page(request: web.Request) -> web.Response:
             form = await request.post()
             action = str(form.get("action", "")).strip().lower()
             if action == "add":
-                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                user_id = _parse_positive_int(form.get("user_id"), "מזהה משתמש בדיסקורד")
                 assert user_id is not None
                 reason = str(form.get("reason", "")).strip()
                 if not reason:
@@ -1951,7 +2083,7 @@ async def admin_blacklist_page(request: web.Request) -> web.Response:
                 await bot.services.delivery.purge_deliveries(bot, user_id=user_id)
                 raise web.HTTPFound("/admin/blacklist?saved=added")
             if action == "remove":
-                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                user_id = _parse_positive_int(form.get("user_id"), "מזהה משתמש בדיסקורד")
                 assert user_id is not None
                 await bot.services.blacklist.remove_entry(user_id)
                 raise web.HTTPFound("/admin/blacklist?saved=removed")
@@ -2046,7 +2178,7 @@ async def admin_blacklist_page(request: web.Request) -> web.Response:
                 <form method="post">
                     <input type="hidden" name="action" value="add">
                     <div class="grid">
-                        <label class="field"><span>Discord User ID</span><input type="number" min="1" name="user_id" required></label>
+                        <label class="field"><span>מזהה משתמש בדיסקורד</span><input type="number" min="1" name="user_id" required></label>
                         <label class="field field-wide"><span>סיבה</span><textarea name="reason" required></textarea></label>
                     </div>
                     <div class="actions"><button type="submit">הכנס לבלאקליסט</button></div>
@@ -2136,7 +2268,7 @@ async def _resolve_gamepass_context(bot: "SalesBot", discord_user_id: int) -> tu
     link = await bot.services.roblox_creator.get_link(bot.settings.primary_guild_id)
     if link.discord_user_id != discord_user_id:
         raise PermissionDeniedError(
-            "כדי לנהל גיימפאסים מהאתר צריך להתחבר עם חשבון Discord שקישר את owner access דרך /linkasowner."
+            "כדי לנהל גיימפאסים מהאתר צריך להתחבר עם חשבון דיסקורד שקישר את owner access דרך /linkasowner."
         )
     return bot.settings.primary_guild_id, discord_user_id
 
@@ -2147,14 +2279,14 @@ async def _owner_order_embed(
 ) -> discord.Embed:
     embed = discord.Embed(title="יש בקשה לקניית מערכת מיוחדת חדשה", color=discord.Color.gold())
     embed.add_field(name="מערכת מיוחדת", value=special_system.title, inline=False)
-    embed.add_field(name="משתמש Discord", value=f"<@{order.user_id}>\n{order.discord_name}\n{order.user_id}", inline=False)
-    embed.add_field(name="שם Roblox שנשלח", value=order.roblox_name, inline=False)
+    embed.add_field(name="משתמש דיסקורד", value=f"<@{order.user_id}>\n{order.discord_name}\n{order.user_id}", inline=False)
+    embed.add_field(name="שם רובלוקס שנשלח", value=order.roblox_name, inline=False)
     embed.add_field(name="שיטת תשלום", value=f"{order.payment_method_label} | {order.payment_price}", inline=False)
     linked_label = "לא מחובר"
     if order.linked_roblox_sub:
         parts = [order.linked_roblox_display_name or "", order.linked_roblox_username or "", order.linked_roblox_sub]
         linked_label = " | ".join(part for part in parts if part)
-    embed.add_field(name="חשבון Roblox מחובר", value=linked_label, inline=False)
+    embed.add_field(name="חשבון רובלוקס מחובר", value=linked_label, inline=False)
     embed.add_field(name="סטטוס", value=ORDER_STATUS_LABELS.get(order.status, order.status), inline=False)
     embed.set_footer(text=f"בקשה #{order.id}")
     return embed
@@ -2164,7 +2296,7 @@ async def _owner_custom_order_embed(bot: "SalesBot", order: OrderRequestRecord) 
     requester_label = await _discord_user_label(bot, order.user_id)
     image_count = len(await bot.services.orders.list_request_images(order.id))
     embed = discord.Embed(title="יש הזמנה אישית חדשה", color=discord.Color.gold())
-    embed.add_field(name="משתמש Discord", value=f"<@{order.user_id}>\n{requester_label}\n{order.user_id}", inline=False)
+    embed.add_field(name="משתמש דיסקורד", value=f"<@{order.user_id}>\n{requester_label}\n{order.user_id}", inline=False)
     embed.add_field(name="מה אתה רוצה להזמין", value=order.requested_item, inline=False)
     embed.add_field(name="תוך כמה זמן אתה צריך את זה", value=order.required_timeframe, inline=False)
     embed.add_field(name="איך אתה משלם", value=order.payment_method, inline=False)
@@ -2319,7 +2451,7 @@ async def _send_account_payment_submission_to_admins(
         except discord.HTTPException:
             continue
 
-        embed = discord.Embed(title="נשלח משתמש Roblox בתור תשלום", color=discord.Color.orange())
+        embed = discord.Embed(title="נשלח משתמש רובלוקס בתור תשלום", color=discord.Color.orange())
         embed.add_field(name="שולח", value=f"{sender_label}\n{session.discord_user_id}", inline=False)
         embed.add_field(name="השם של המשתמש רובלוקס", value=roblox_username, inline=False)
         embed.add_field(name="סיסמא של המשתמש רובלוקס", value=roblox_password, inline=False)
@@ -2416,7 +2548,7 @@ async def website_callback(request: web.Request) -> web.Response:
     state = request.query.get("state", "")
     code = request.query.get("code", "")
     if not state or not code:
-        return _error_response("התחברות לאתר", "חסרים פרטי התחברות מהחזרה של Discord.", status=400)
+        return _error_response("התחברות לאתר", "חסרים פרטי התחברות מהחזרה של דיסקורד.", status=400)
     try:
         next_path = await bot.services.web_auth.consume_state(state)
         tokens = await bot.services.web_auth.exchange_code(bot.http_session, code)
@@ -2476,13 +2608,13 @@ async def admin_settings_page(request: web.Request) -> web.Response:
             roblox_link = None
 
         if roblox_link is None:
-            roblox_profile = '<div class="price-item"><strong>Roblox</strong><span>אין חשבון Roblox מחובר כרגע.</span></div>'
+            roblox_profile = '<div class="price-item"><strong>רובלוקס</strong><span>אין חשבון רובלוקס מחובר כרגע.</span></div>'
         else:
             roblox_parts = [part for part in (roblox_link.roblox_display_name, roblox_link.roblox_username, roblox_link.roblox_sub) if part]
             roblox_summary = " | ".join(roblox_parts) if roblox_parts else roblox_link.roblox_sub
             profile_link_html = f'<a href="{_escape(roblox_link.profile_url)}" target="_blank" rel="noreferrer">פתח פרופיל</a>' if roblox_link.profile_url else 'אין קישור פרופיל'
             roblox_profile = f"""
-            <div class="price-item"><strong>Roblox</strong><span>{_escape(roblox_summary)}</span></div>
+            <div class="price-item"><strong>רובלוקס</strong><span>{_escape(roblox_summary)}</span></div>
             <div class="price-item"><strong>קישור</strong><span>{profile_link_html}</span></div>
             <div class="price-item"><strong>קושר בתאריך</strong><span>{_escape(roblox_link.linked_at)}</span></div>
             """
@@ -2496,12 +2628,12 @@ async def admin_settings_page(request: web.Request) -> web.Response:
                     <div>
                         <p class="eyebrow">הפרופיל שלך</p>
                         <h2>{_escape(_session_label(session))}</h2>
-                        <p class="muted">פרטי Discord, חיבור Roblox קיים והדרגה של החשבון שמחובר כרגע לאתר.</p>
+                        <p class="muted">פרטי דיסקורד, חיבור רובלוקס קיים והדרגה של החשבון שמחובר כרגע לאתר.</p>
                     </div>
                 </div>
                 <div class="price-list">
-                    <div class="price-item"><strong>Discord</strong><span>{_escape(_session_label(session))}</span></div>
-                    <div class="price-item"><strong>User ID</strong><span class="mono">{_escape(session.discord_user_id)}</span></div>
+                    <div class="price-item"><strong>דיסקורד</strong><span>{_escape(_session_label(session))}</span></div>
+                    <div class="price-item"><strong>מזהה משתמש</strong><span class="mono">{_escape(session.discord_user_id)}</span></div>
                     <div class="price-item"><strong>דרגה</strong><span>{_escape(_admin_rank_label(bot, session.discord_user_id))}</span></div>
                     <div class="price-item"><strong>סשן נוצר</strong><span>{_escape(session.created_at)}</span></div>
                     <div class="price-item"><strong>נראה לאחרונה</strong><span>{_escape(session.last_seen_at)}</span></div>
@@ -2580,7 +2712,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
             <div class="card"><h3>מערכות מיוחדות</h3><p>פרסום מערכת מיוחדת עם כפתור קניה, תמונות, מחירים ושיטות תשלום.</p><div class="actions"><a class="link-button" href="/admin/special-systems">פתח</a></div></div>
             <div class="card"><h3>בקשות מיוחדות</h3><p>רשימת כל הבקשות, צפייה בפרטים, אישור או דחייה עם הודעה חזרה.</p><div class="actions"><a class="link-button" href="/admin/special-orders">פתח</a></div></div>
             <div class="card"><h3>קודי הנחה</h3><p>יצירת קודים כלליים או קודים למערכת מסוימת, עם מגבלות שימוש ותוקף.</p><div class="actions"><a class="link-button" href="/admin/discount-codes">פתח</a></div></div>
-            <div class="card"><h3>התראות ללקוחות</h3><p>שליחת התראה ישירות לפי Discord User ID, כולל שמירה במרכז ההתראות באתר.</p><div class="actions"><a class="link-button" href="/admin/notifications">פתח</a></div></div>
+            <div class="card"><h3>התראות ללקוחות</h3><p>שליחת התראה ישירות לפי מזהה משתמש בדיסקורד, כולל שמירה במרכז ההתראות באתר.</p><div class="actions"><a class="link-button" href="/admin/notifications">פתח</a></div></div>
             <div class="card"><h3>כלי תוכן קיימים</h3><p>הפאנלים הקיימים של סקרים, הגרלות ואירועים נשארו זמינים גם דרך האתר.</p><div class="actions"><a class="link-button" href="/admin/polls/new">סקרים</a><a class="link-button ghost-button" href="/admin/giveaways/new">הגרלות</a><a class="link-button ghost-button" href="/admin/events/new">אירועים</a></div></div>
             <div class="card"><h3>הגדרות אישיות</h3><p>פרטי החשבון המחובר, הדרגה שלך והעדפת ערכת הנושא של האתר.</p><div class="actions"><a class="link-button" href="/admin/settings">פתח</a></div></div>
         </div>
@@ -2669,6 +2801,9 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
             order_id = _parse_positive_int(form.get("order_id"), "מזהה הזמנה")
             assert order_id is not None
             if action == "complete":
+                existing_order = await bot.services.payments.get_checkout_order(order_id)
+                if existing_order.payment_method == "paypal":
+                    raise PermissionDeniedError("הזמנות PayPal מושלמות אוטומטית אחרי אישור התשלום מפייפאל, ולא דרך הכפתור הידני הזה.")
                 order = await bot.services.payments.complete_checkout_order(bot, order_id, session.discord_user_id)
                 message = f"הזמנה #{order.id} הושלמה והמערכות נשלחו ב-DM."
                 await bot.services.notifications.create_notification(
@@ -2717,6 +2852,9 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
                     <div class="price-item"><strong>הזמנה #{order.id}</strong><span>{_status_badge(order.status)}</span></div>
                     <div class="price-item"><strong>לקוח</strong><span>{_escape(label)}<br><span class="mono">{order.user_id}</span></span></div>
                     <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(_checkout_method_label(order.payment_method))}</span></div>
+                    {f'<div class="price-item"><strong>סטטוס PayPal</strong><span>{_escape(_paypal_status_label(order.paypal_status))}</span></div>' if order.payment_method == 'paypal' else ''}
+                    {f'<div class="price-item"><strong>PayPal Order ID</strong><span class="mono">{_escape(order.paypal_order_id or "-")}</span></div>' if order.payment_method == 'paypal' else ''}
+                    {f'<div class="price-item"><strong>PayPal Capture ID</strong><span class="mono">{_escape(order.paypal_capture_id or "-")}</span></div>' if order.payment_method == 'paypal' else ''}
                     <div class="price-item"><strong>סכום ביניים</strong><span>{_escape(_money_label(order.subtotal_amount, order.currency))}</span></div>
                     <div class="price-item"><strong>הנחה</strong><span>{_escape(_money_label(order.discount_amount, order.currency))}</span></div>
                     <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
@@ -2729,7 +2867,7 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
                     <h3>מערכות בהזמנה</h3>
                     <div class="price-list">{_checkout_items_html(items, order.currency)}</div>
                 </div>
-                {'' if order.status != 'pending' else f'<div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="complete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit">סמן כהושלמה ושלח</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>'}
+                {'' if order.status != 'pending' else (f'<div class="meta-card"><strong>PayPal:</strong> ההזמנה הזאת תושלם אוטומטית אחרי אישור וחזרה מ-PayPal או דרך הוובהוק.</div><div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>' if order.payment_method == 'paypal' else f'<div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="complete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit">סמן כהושלמה ושלח</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>')}
             </div>
             '''
             for order, label, items in zip(orders, labels, item_lists, strict=False)
@@ -2739,11 +2877,11 @@ async def admin_checkout_orders_page(request: web.Request) -> web.Response:
         {_notice_html(notice, success=success)}
         <div class="card stack">
             <h2>סקירת קופות אתר</h2>
-            <p>העמוד הזה מרכז את כל הזמנות הסל שנפתחו דרך האתר. אפשר לסמן הזמנה כהושלמה כדי לשלוח את כל המערכות, או לבטל עם סיבה שתישמר אצל הלקוח במרכז ההתראות.</p>
+            <p>העמוד הזה מרכז את כל הזמנות הסל שנפתחו דרך האתר. קופות כרטיס עדיין מטופלות ידנית, וקופות PayPal מוצגות כאן עם סטטוס ההזמנה האמיתי מפייפאל עד למסירה האוטומטית.</p>
         </div>
         <div class="stack">{cards}</div>
         '''
-        body = _admin_shell(session, current_path=request.path, title="קופות אתר", intro="כל הקופות המרוכזות שמגיעות מהאתר, עם אישור או ביטול ידני.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="קופות אתר", intro="כל הקופות המרוכזות שמגיעות מהאתר, עם אישור ידני לכרטיס ומעקב אוטומטי אחרי PayPal.", content=content)
         return _page_response("קופות אתר", body)
     except web.HTTPException:
         raise
@@ -2857,7 +2995,7 @@ async def admin_notifications_page(request: web.Request) -> web.Response:
             form = await request.post()
             action = str(form.get("action", "")).strip()
             if action == "send":
-                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                user_id = _parse_positive_int(form.get("user_id"), "מזהה משתמש בדיסקורד")
                 assert user_id is not None
                 title = str(form.get("title", "")).strip()
                 body_text = str(form.get("body", "")).strip()
@@ -2905,11 +3043,11 @@ async def admin_notifications_page(request: web.Request) -> web.Response:
         {_notice_html(notice, success=success)}
         <div class="split-grid">
             <div class="card stack">
-                <h2>שליחת התראה לפי Discord ID</h2>
+                <h2>שליחת התראה לפי מזהה משתמש בדיסקורד</h2>
                 <form method="post">
                     <input type="hidden" name="action" value="send">
                     <div class="grid">
-                        <label class="field"><span>Discord User ID</span><input type="number" min="1" name="user_id" required></label>
+                        <label class="field"><span>מזהה משתמש בדיסקורד</span><input type="number" min="1" name="user_id" required></label>
                         <label class="field field-wide"><span>כותרת</span><input type="text" name="title" maxlength="180" required></label>
                         <label class="field field-wide"><span>הודעה</span><textarea name="body" required></textarea></label>
                         <label class="field field-wide"><span>קישור פנימי אופציונלי</span><input type="text" name="link_path" placeholder="/inbox"></label>
@@ -2924,7 +3062,7 @@ async def admin_notifications_page(request: web.Request) -> web.Response:
         </div>
         <div class="stack">{history_html}</div>
         '''
-        body = _admin_shell(session, current_path=request.path, title="התראות ללקוחות", intro="שליחת הודעות יזומות ללקוחות דרך Discord User ID, יחד עם שמירה קבועה במרכז ההתראות באתר.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="התראות ללקוחות", intro="שליחת הודעות יזומות ללקוחות דרך מזהה משתמש בדיסקורד, יחד עם שמירה קבועה במרכז ההתראות באתר.", content=content)
         return _page_response("התראות ללקוחות", body)
     except web.HTTPException:
         raise
@@ -2975,7 +3113,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                 notice = f"המערכת {deleted.name} נמחקה."
             elif action == "grant":
                 system_id = _parse_positive_int(form.get("system_id"), "מזהה מערכת")
-                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                user_id = _parse_positive_int(form.get("user_id"), "מזהה משתמש בדיסקורד")
                 assert system_id is not None and user_id is not None
                 system = await bot.services.systems.get_system(system_id)
                 user = bot.get_user(user_id) or await bot.fetch_user(user_id)
@@ -2983,7 +3121,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                 notice = f"המערכת {system.name} נשלחה למשתמש {user_id}."
             elif action == "revoke":
                 system_id = _parse_positive_int(form.get("system_id"), "מזהה מערכת")
-                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                user_id = _parse_positive_int(form.get("user_id"), "מזהה משתמש בדיסקורד")
                 assert system_id is not None and user_id is not None
                 system = await bot.services.systems.get_system(system_id)
                 await bot.services.ownership.revoke_system(user_id, system_id)
@@ -3022,9 +3160,9 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                     <div class="grid">
                         <label class="field field-wide"><span>שם</span><input type="text" name="name" required></label>
                         <label class="field field-wide"><span>תיאור</span><textarea name="description" required></textarea></label>
-                        <label class="field"><span>קישור פייפאל</span><input type="url" name="paypal_link"></label>
+                        <label class="field"><span>קישור פייפאל ישיר (ישן, אופציונלי)</span><input type="url" name="paypal_link"></label>
                         <label class="field"><span>גיימפאס רובקס</span><input type="text" name="roblox_gamepass"></label>
-                        <label class="field"><span>מחיר באתר</span><input type="text" name="website_price" inputmode="decimal" placeholder="19.99"></label>
+                        <label class="field"><span>מחיר באתר / לקופת PayPal</span><input type="text" name="website_price" inputmode="decimal" placeholder="19.99"></label>
                         <label class="field"><span>מטבע</span><input type="text" name="website_currency" maxlength="3" value="USD"></label>
                         <label class="field"><span>קובץ מערכת</span><input type="file" name="file" required></label>
                         <label class="field"><span>תמונות</span><input type="file" name="images" accept="image/*" multiple></label>
@@ -3158,7 +3296,7 @@ async def admin_gamepasses_page(request: web.Request) -> web.Response:
                 embed.title = f"קניית {linked_system.name}"
                 embed.description = f"קנו את **{linked_system.name}** דרך הגיימפאס הזה.\n\nמחיר: **{_gamepass_price_label(gamepass_record)}**"
                 view = discord.ui.View()
-                view.add_item(discord.ui.Button(label="קניה ב-Roblox", style=discord.ButtonStyle.link, url=bot.services.roblox_creator.gamepass_url(gamepass_record.game_pass_id)))
+                view.add_item(discord.ui.Button(label="קניה ברובלוקס", style=discord.ButtonStyle.link, url=bot.services.roblox_creator.gamepass_url(gamepass_record.game_pass_id)))
                 await channel.send(embed=embed, view=view)
                 notice = f"הגיימפאס {gamepass_record.name} פורסם בערוץ שנבחר."
         gamepasses = await bot.services.roblox_creator.list_gamepasses(bot, guild_id, discord_user_id)
@@ -3519,10 +3657,10 @@ async def special_order_detail_page(request: web.Request) -> web.Response:
                 <div class="price-list">
                     <div class="price-item"><strong>מערכת מיוחדת</strong><span>{_escape(special_system.title)}</span></div>
                     <div class="price-item"><strong>סטטוס</strong><span>{_status_badge(order.status)}</span></div>
-                    <div class="price-item"><strong>Discord</strong><span>{_escape(order.discord_name)}<br><span class="mono">{order.user_id}</span></span></div>
-                    <div class="price-item"><strong>Roblox שנשלח</strong><span>{_escape(order.roblox_name)}</span></div>
+                    <div class="price-item"><strong>דיסקורד</strong><span>{_escape(order.discord_name)}<br><span class="mono">{order.user_id}</span></span></div>
+                    <div class="price-item"><strong>רובלוקס שנשלח</strong><span>{_escape(order.roblox_name)}</span></div>
                     <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(order.payment_method_label)} | {_escape(order.payment_price)}</span></div>
-                    <div class="price-item"><strong>חשבון Roblox מחובר</strong><span>{_escape(linked_roblox_label)}</span></div>
+                    <div class="price-item"><strong>חשבון רובלוקס מחובר</strong><span>{_escape(linked_roblox_label)}</span></div>
                     <div class="price-item"><strong>נשלח בתאריך</strong><span>{_escape(order.submitted_at)}</span></div>
                 </div>
             </div>
@@ -3581,7 +3719,7 @@ async def custom_orders_list_page(request: web.Request) -> web.Response:
         content = f"""
         {_notice_html(notice, success=True)}
         <div class="actions"><a class="link-button ghost-button" href="/admin/custom-orders?status=all">הכל</a><a class="link-button ghost-button" href="/admin/custom-orders?status=pending">ממתינות</a><a class="link-button ghost-button" href="/admin/custom-orders?status=accepted">התקבלו</a><a class="link-button ghost-button" href="/admin/custom-orders?status=completed">הושלמו</a><a class="link-button ghost-button" href="/admin/custom-orders?status=rejected">נדחו</a></div>
-        <div class="table-wrap"><table><thead><tr><th>#</th><th>לקוח</th><th>מה הוזמן</th><th>תשלום</th><th>Roblox</th><th>סטטוס</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>#</th><th>לקוח</th><th>מה הוזמן</th><th>תשלום</th><th>רובלוקס</th><th>סטטוס</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>
         """
         body = _admin_shell(session, current_path=request.path, title="הזמנות אישיות", intro="ריכוז כל ההזמנות האישיות שנשלחו דרך דף האתר החדש.", content=content)
         return _page_response("הזמנות אישיות", body)
@@ -3661,12 +3799,12 @@ async def custom_order_detail_page(request: web.Request) -> web.Response:
                 <div><h2>פרטי ההזמנה</h2></div>
                 <div class="price-list">
                     <div class="price-item"><strong>סטטוס</strong><span>{_status_badge(order.status)}</span></div>
-                    <div class="price-item"><strong>Discord</strong><span>{_escape(requester_label)}<br><span class="mono">{order.user_id}</span></span></div>
+                    <div class="price-item"><strong>דיסקורד</strong><span>{_escape(requester_label)}<br><span class="mono">{order.user_id}</span></span></div>
                     <div class="price-item"><strong>מה הוזמן</strong><span>{_escape(order.requested_item)}</span></div>
                     <div class="price-item"><strong>דדליין שביקש הלקוח</strong><span>{_escape(order.required_timeframe)}</span></div>
                     <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(order.payment_method)}</span></div>
                     <div class="price-item"><strong>הצעת מחיר / תמורה</strong><span>{_escape(order.offered_price)}</span></div>
-                    <div class="price-item"><strong>שם Roblox</strong><span>{_escape(order.roblox_username or 'לא צוין')}</span></div>
+                    <div class="price-item"><strong>שם רובלוקס</strong><span>{_escape(order.roblox_username or 'לא צוין')}</span></div>
                     <div class="price-item"><strong>תמונות שצורפו</strong><span>{len(order_images)}</span></div>
                     <div class="price-item"><strong>נשלח בתאריך</strong><span>{_escape(order.submitted_at)}</span></div>
                     {review_meta}
@@ -3811,17 +3949,17 @@ async def custom_orders_page(request: web.Request) -> web.Response:
         )
         connected_account_html = ''
         if session is not None:
-            connected_account_html = f'<div class="meta-card"><p><strong>חשבון Discord מחובר:</strong> {_escape(_session_label(session))}</p></div>'
+            connected_account_html = f'<div class="meta-card"><p><strong>חשבון דיסקורד מחובר:</strong> {_escape(_session_label(session))}</p></div>'
         content = f"""
         {_notice_html(notice, success=success)}
         <div class="split-grid">
             <div class="card stack">
-                <div><h2>מה מקבלים בדף הזה</h2><p>אפשר לשלוח הזמנה אישית בלי לחבר חשבון Roblox ל-Discord. כל מה שצריך הוא להתחבר עם Discord ולמלא את הפרטים.</p></div>
+                <div><h2>מה מקבלים בדף הזה</h2><p>אפשר לשלוח הזמנה אישית בלי לחבר חשבון רובלוקס לדיסקורד. כל מה שצריך הוא להתחבר עם דיסקורד ולמלא את הפרטים.</p></div>
                 <div><h3>שיטות תשלום זמינות</h3><div class="price-list">{payment_methods_html}</div></div>
             </div>
             <div class="card">
                 <h2>טופס הזמנה אישית</h2>
-                <p class="muted">כל השדות חובה. שם ה-Discord שלך נלקח אוטומטית מההתחברות לאתר.</p>
+                <p class="muted">כל השדות חובה. שם הדיסקורד שלך נלקח אוטומטית מההתחברות לאתר.</p>
                 {connected_account_html}
                 <form method="post" enctype="multipart/form-data">
                     <div class="grid">
@@ -3847,7 +3985,7 @@ async def custom_orders_page(request: web.Request) -> web.Response:
             session,
             current_path="/custom-orders",
             title="הזמנה אישית",
-            intro="שלח כאן הזמנה אישית חדשה במקום הטופס הישן של Discord.",
+            intro="שלח כאן הזמנה אישית חדשה במקום הטופס הישן של דיסקורד.",
             login_path="/custom-orders",
             section_label="הזמנות אישיות",
             content=content,
@@ -3919,7 +4057,7 @@ async def account_payment_page(request: web.Request) -> web.Response:
                     title="שליחת משתמש בתור תשלום",
                     intro="הטופס נשלח לאדמינים בהצלחה.",
                     login_path="/account-payment",
-                    section_label="תשלום במשתמש Roblox",
+                    section_label="תשלום במשתמש רובלוקס",
                     content=_notice_html("הטופס נשלח בהצלחה לאדמינים.", success=True) + success_html,
                 )
                 return _page_response("שליחת משתמש בתור תשלום", body)
@@ -3931,7 +4069,7 @@ async def account_payment_page(request: web.Request) -> web.Response:
 
         connected_account_html = ""
         if session is not None:
-            connected_account_html = f'<div class="meta-card"><p><strong>חשבון Discord מחובר:</strong> {_escape(_session_label(session))}</p></div>'
+            connected_account_html = f'<div class="meta-card"><p><strong>חשבון דיסקורד מחובר:</strong> {_escape(_session_label(session))}</p></div>'
 
         content = f"""
         {_notice_html(notice, success=success)}
@@ -3947,7 +4085,7 @@ async def account_payment_page(request: web.Request) -> web.Response:
             </div>
             <div class="card">
                 <h2>טופס שליחת משתמש</h2>
-                <p class="muted">הטופס הזה דורש התחברות עם Discord כדי שנדע מי שלח את הפרטים.</p>
+                <p class="muted">הטופס הזה דורש התחברות עם דיסקורד כדי שנדע מי שלח את הפרטים.</p>
                 {connected_account_html}
                 <form method="post" enctype="multipart/form-data">
                     <div class="grid">
@@ -3982,9 +4120,9 @@ async def account_payment_page(request: web.Request) -> web.Response:
             session,
             current_path="/account-payment",
             title="שליחת משתמש בתור תשלום",
-            intro="שלח כאן את פרטי המשתמש שאתה מביא כתשלום, אחרי התחברות עם Discord.",
+            intro="שלח כאן את פרטי המשתמש שאתה מביא כתשלום, אחרי התחברות עם דיסקורד.",
             login_path="/account-payment",
-            section_label="תשלום במשתמש Roblox",
+            section_label="תשלום במשתמש רובלוקס",
             content=content,
         )
         return _page_response("שליחת משתמש בתור תשלום", body)
@@ -4066,8 +4204,8 @@ async def special_system_page(request: web.Request) -> web.Response:
             </div>
             <div class="card">
                 <h2>טופס הזמנה</h2>
-                <p class="muted">אפשר לשלוח בקשה גם בלי חשבון Roblox מחובר. אם כבר חיברת Roblox, נצרף אותו אוטומטית לבקשה.</p>
-                <div class="meta-card"><p><strong>חשבון Roblox מחובר:</strong> {_escape(linked_label)}</p></div>
+                <p class="muted">אפשר לשלוח בקשה גם בלי חשבון רובלוקס מחובר. אם כבר חיברת רובלוקס, נצרף אותו אוטומטית לבקשה.</p>
+                <div class="meta-card"><p><strong>חשבון רובלוקס מחובר:</strong> {_escape(linked_label)}</p></div>
                 <form method="post">
                     <div class="grid">
                         <label class="field field-wide"><span>איזה שיטת תשלום אתה משלם</span><select name="payment_method" required>{_payment_method_select_options(special_system, selected_payment_method)}</select></label>

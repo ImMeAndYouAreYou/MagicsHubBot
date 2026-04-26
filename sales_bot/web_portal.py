@@ -667,64 +667,65 @@ def _theme_options(selected_theme: str) -> str:
     )
 
 
-def _admin_robux_calculator_html() -> str:
+
+from __future__ import annotations
+
+
     return """
-    <div class="robux-tool" data-robux-tool>
-        <button type="button" class="robux-tool-toggle" data-robux-toggle aria-expanded="false">מחשבון Robux</button>
-        <section class="robux-tool-panel" data-robux-panel hidden>
-            <div class="robux-tool-header">
+    <div class=\"robux-tool\" data-robux-tool>
+        <button type=\"button\" class=\"robux-tool-toggle\" data-robux-toggle aria-expanded=\"false\">מחשבון Robux</button>
+        <section class=\"robux-tool-panel\" data-robux-panel hidden>
+            <div class=\"robux-tool-header\">
                 <div>
-                    <h2 class="robux-tool-title">Robux -> USD / ILS</h2>
+                    <h2 class=\"robux-tool-title\">Robux -> USD / ILS</h2>
                     <p>מחשבון מהיר לערך ברוטו ונטו אחרי עמלת Roblox.</p>
                 </div>
-                <button type="button" class="ghost-button robux-tool-close" data-robux-close>סגור</button>
+                <button type=\"button\" class=\"ghost-button robux-tool-close\" data-robux-close>סגור</button>
             </div>
-            <div class="robux-tool-grid">
-                <label class="field field-wide">
+            <div class=\"robux-tool-grid\">
+                <label class=\"field field-wide\">
                     <span>כמות Robux</span>
-                    <input type="number" min="0" step="1" value="1000" inputmode="numeric" data-robux-input>
+                    <input type=\"number\" min=\"0\" step=\"1\" value=\"1000\" inputmode=\"numeric\" data-robux-input>
                 </label>
-                <label class="field">
+                <label class=\"field\">
                     <span>עמלת Roblox %</span>
-                    <input type="number" min="0" max="100" step="0.01" value="30" inputmode="decimal" data-robux-fee>
+                    <input type=\"number\" min=\"0\" max=\"100\" step=\"0.01\" value=\"30\" inputmode=\"decimal\" data-robux-fee>
                 </label>
-                <label class="field">
+                <label class=\"field\">
                     <span>USD לכל 1 Robux</span>
-                    <input type="number" min="0" step="0.0001" value="0.0035" inputmode="decimal" data-usd-rate>
+                    <input type=\"number\" min=\"0\" step=\"0.0001\" value=\"0.0035\" inputmode=\"decimal\" data-usd-rate>
                 </label>
-                <label class="field field-wide">
+                <label class=\"field field-wide\">
                     <span>ILS לכל 1 USD</span>
-                    <input type="number" min="0" step="0.01" value="3.65" inputmode="decimal" data-ils-rate>
+                    <input type=\"number\" min=\"0\" step=\"0.01\" value=\"3.65\" inputmode=\"decimal\" data-ils-rate>
                 </label>
             </div>
-            <div class="robux-result-grid">
-                <div class="robux-result-card">
+            <div class=\"robux-result-grid\">
+                <div class=\"robux-result-card\">
                     <strong data-robux-gross-usd>0.00 USD</strong>
                     <span>ערך ברוטו בדולר</span>
                 </div>
-                <div class="robux-result-card">
+                <div class=\"robux-result-card\">
                     <strong data-robux-gross-ils>0.00 ILS</strong>
                     <span>ערך ברוטו בשקל</span>
                 </div>
-                <div class="robux-result-card">
+                <div class=\"robux-result-card\">
                     <strong data-robux-net>0 Robux</strong>
                     <span>Robux נטו אחרי עמלה</span>
                 </div>
-                <div class="robux-result-card">
+                <div class=\"robux-result-card\">
                     <strong data-robux-net-usd>0.00 USD</strong>
                     <span>ערך נטו בדולר</span>
                 </div>
-                <div class="robux-result-card">
+                <div class=\"robux-result-card\">
                     <strong data-robux-net-ils>0.00 ILS</strong>
                     <span>ערך נטו בשקל</span>
                 </div>
             </div>
-            <p class="muted robux-tool-footer">ברירת המחדל מבוססת על שער DevEx של 0.0035 USD לכל Robux, ואפשר לשנות כל שדה לפי החישוב שאתה צריך.</p>
+            <p class=\"muted robux-tool-footer\">ברירת המחדל מבוססת על שער DevEx של 0.0035 USD לכל Robux, ואפשר לשנות כל שדה לפי החישוב שאתה צריך.</p>
         </section>
     </div>
     """
-
-
 def _admin_shell(
     session: WebsiteSessionRecord,
     *,

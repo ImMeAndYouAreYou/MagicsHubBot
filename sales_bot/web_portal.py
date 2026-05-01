@@ -1,3 +1,18 @@
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import mimetypes
+import logging
+from io import BytesIO
+import time
+from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
+
+import discord
+from aiohttp import web
+
 def _public_robux_calculator_html() -> str:
     return """
         <div class=\"robux-tool\" data-robux-tool>
@@ -54,21 +69,7 @@ def _public_robux_calculator_html() -> str:
             </section>
         </div>
     """
-from __future__ import annotations
-
-import asyncio
-from datetime import datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-import mimetypes
-import logging
-from io import BytesIO
-import time
-from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
-
-import discord
-from aiohttp import web
-
+    
 from sales_bot.exceptions import (
     ConfigurationError,
     ExternalServiceError,
